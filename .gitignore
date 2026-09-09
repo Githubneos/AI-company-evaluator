@@ -8,3 +8,8 @@ artifacts/
 .DS_Store
 .env
 .env.*
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
