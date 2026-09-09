@@ -1,0 +1,37 @@
+[project]
+name = "ai-company-evaluator"
+version = "0.1.0"
+description = "Forward price-movement risk scoring from market data, news sentiment, and an LLM reasoning layer"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "numpy<3",
+    "lightgbm>=4.5",
+    "shap>=0.46",
+    "scikit-learn>=1.5",
+    "yfinance>=0.2.50",
+    "anthropic>=1.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pyarrow>=17",
+    "torch>=2.2",
+    "transformers>=4.46",
+    "optuna>=3.6",
+    "xgboost>=2.1",
+    "mlflow>=2.17",
+    "joblib>=1.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["evaluator*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
