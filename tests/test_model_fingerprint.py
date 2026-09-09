@@ -2,10 +2,6 @@
 
 import json
 
-import numpy as np
-import pandas as pd
-import pytest
-
 from evaluator.feedback.store import connect, live_skill, log_prediction
 
 
