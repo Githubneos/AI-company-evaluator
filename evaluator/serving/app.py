@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from evaluator import __version__
 from evaluator.data.universe import cik_for, load_universe
 from evaluator.feedback.postmortem import tag_summary
 from evaluator.feedback.store import feedback_context, log_prediction, resolve_pending
@@ -37,7 +38,7 @@ app = FastAPI(
         "Forward price-movement risk scoring from market data, SEC events, and "
         "news sentiment. Research tooling, not investment advice."
     ),
-    version="0.2.0",
+    version=__version__,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
