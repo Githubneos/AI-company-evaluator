@@ -39,6 +39,13 @@ include = ["evaluator*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# -ra: say why anything was skipped or xfailed instead of hiding it in dots.
+addopts = "-ra"
+filterwarnings = [
+    # Starlette's TestClient still reaches for the old anyio alias; nothing in
+    # this repo can fix that, and it buries any warning that is ours.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 120
