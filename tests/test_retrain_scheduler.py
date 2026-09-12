@@ -106,3 +106,11 @@ class TestScheduler:
         result = run_job("resolve_outcomes")
         assert result["status"] == "failed"
         assert "kaboom" in result["result"]["error"]
+
+
+def test_cron_file_quotes_paths_containing_spaces():
+    text = cron_file(python="/opt/my env/bin/python", cwd="/home/me/My Projects/evaluator")
+
+    line = next(line for line in text.splitlines() if "--run score_universe" in line)
+    assert "cd '/home/me/My Projects/evaluator'" in line
+    assert "'/opt/my env/bin/python' -m evaluator.scheduler" in line

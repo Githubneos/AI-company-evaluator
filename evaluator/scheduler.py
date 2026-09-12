@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import shlex
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -148,13 +150,13 @@ def run_job(name: str) -> dict:
 
 
 def cron_file(python: str | None = None, cwd: str | None = None) -> str:
-    import os
-
     python = python or sys.executable
     cwd = cwd or os.getcwd()
     lines = ["# AI Company Evaluator scheduled jobs"]
     for name, schedule in CRON_LINES.items():
-        lines.append(f"{schedule} cd {cwd} && {python} -m evaluator.scheduler --run {name}")
+        # Quoted: a checkout under "~/My Projects" would otherwise split into two
+        # arguments and every job would silently fail to start.
+        lines.append(f"{schedule} cd {shlex.quote(cwd)} && {shlex.quote(python)} -m evaluator.scheduler --run {name}")
     return "\n".join(lines) + "\n"
 
 
