@@ -1,6 +1,7 @@
 """Retraining triggers and job registry (spec 6.3, 7)."""
 
 import json
+import sys
 
 import numpy as np
 import pandas as pd
@@ -114,3 +115,19 @@ def test_cron_file_quotes_paths_containing_spaces():
     line = next(line for line in text.splitlines() if "--run score_universe" in line)
     assert "cd '/home/me/My Projects/evaluator'" in line
     assert "'/opt/my env/bin/python' -m evaluator.scheduler" in line
+
+
+def test_a_failed_job_exits_nonzero(monkeypatch, capsys):
+    from evaluator import scheduler
+
+    def boom():
+        raise RuntimeError("nope")
+
+    monkeypatch.setitem(JOBS, "boom", scheduler.Job("boom", "never", "always fails", boom))
+    monkeypatch.setattr(sys, "argv", ["scheduler", "--run", "boom"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        scheduler.main()
+
+    assert exit_info.value.code == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "failed"

@@ -182,7 +182,12 @@ def main() -> None:
         return
 
     if args.run:
-        print(json.dumps(run_job(args.run), indent=2, default=str))
+        outcome = run_job(args.run)
+        print(json.dumps(outcome, indent=2, default=str))
+        # A failed job has to be visible to whatever launched it: cron mails on
+        # a non-zero exit, and a wrapper script can only branch on one.
+        if outcome["status"] == "failed":
+            sys.exit(1)
         return
 
     parser.print_help()
