@@ -27,6 +27,11 @@ from datetime import UTC, datetime
 
 log = logging.getLogger(__name__)
 
+#: How many names the 15-minute sentiment poll warms. FinBERT on CPU is the
+#: bottleneck: the poll has to finish well inside its own interval, or runs
+#: pile up behind each other.
+SENTIMENT_POLL_NAMES = 50
+
 
 @dataclass
 class Job:
@@ -79,7 +84,7 @@ def _poll_sentiment() -> dict:
     from evaluator.sentiment.aggregate import score_ticker_sentiment
 
     scored, stale = 0, 0
-    for ticker in tickers(limit=50):
+    for ticker in tickers(limit=SENTIMENT_POLL_NAMES):
         try:
             result = score_ticker_sentiment(ticker, cik_for(ticker))
             scored += 1
