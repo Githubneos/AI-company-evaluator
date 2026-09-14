@@ -131,3 +131,15 @@ def test_a_failed_job_exits_nonzero(monkeypatch, capsys):
 
     assert exit_info.value.code == 1
     assert json.loads(capsys.readouterr().out)["status"] == "failed"
+
+
+def test_an_unknown_job_name_is_a_usage_error_not_a_traceback(monkeypatch, capsys):
+    from evaluator import scheduler
+
+    monkeypatch.setattr(sys, "argv", ["scheduler", "--run", "no_such_job"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        scheduler.main()
+
+    assert exit_info.value.code == 2
+    assert "score_universe" in capsys.readouterr().err

@@ -182,6 +182,8 @@ def main() -> None:
         return
 
     if args.run:
+        if args.run not in JOBS:
+            parser.error(f"unknown job {args.run!r}. Known: {', '.join(sorted(JOBS))}")
         outcome = run_job(args.run)
         print(json.dumps(outcome, indent=2, default=str))
         # A failed job has to be visible to whatever launched it: cron mails on
