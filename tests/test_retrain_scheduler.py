@@ -143,3 +143,9 @@ def test_an_unknown_job_name_is_a_usage_error_not_a_traceback(monkeypatch, capsy
 
     assert exit_info.value.code == 2
     assert "score_universe" in capsys.readouterr().err
+
+
+def test_every_job_has_a_cron_schedule_and_every_schedule_a_job():
+    # A job without a schedule is never run by --install-cron; a schedule without
+    # a job writes a crontab line that fails every night.
+    assert set(CRON_LINES) == set(JOBS)
