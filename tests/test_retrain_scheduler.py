@@ -11,6 +11,14 @@ from evaluator import retrain as rt
 from evaluator.scheduler import CRON_LINES, JOBS, cron_file, run_job
 
 
+@pytest.fixture(autouse=True)
+def lock_dir(tmp_path, monkeypatch):
+    from evaluator import scheduler
+
+    monkeypatch.setattr(scheduler, "LOCK_DIR", tmp_path / "locks")
+    return tmp_path / "locks"
+
+
 @pytest.fixture
 def state(tmp_path, monkeypatch):
     path = tmp_path / "retrain_state.json"
@@ -149,3 +157,20 @@ def test_every_job_has_a_cron_schedule_and_every_schedule_a_job():
     # A job without a schedule is never run by --install-cron; a schedule without
     # a job writes a crontab line that fails every night.
     assert set(CRON_LINES) == set(JOBS)
+
+
+def test_a_job_already_running_is_skipped_not_stacked(monkeypatch):
+    from evaluator import scheduler
+
+    calls = []
+    monkeypatch.setitem(JOBS, "slow", scheduler.Job("slow", "never", "slow", lambda: calls.append(1) or {}))
+
+    with scheduler._exclusive("slow") as acquired:
+        assert acquired
+        outcome = run_job("slow")
+
+    assert outcome["status"] == "skipped"
+    assert calls == []
+    # Once the first run finishes the job is runnable again.
+    assert run_job("slow")["status"] == "ok"
+    assert calls == [1]

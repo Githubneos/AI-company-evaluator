@@ -16,14 +16,19 @@ job bodies do not change.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import logging
 import os
 import shlex
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+
+from evaluator.config import ARTIFACT_DIR
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +36,8 @@ log = logging.getLogger(__name__)
 #: bottleneck: the poll has to finish well inside its own interval, or runs
 #: pile up behind each other.
 SENTIMENT_POLL_NAMES = 50
+
+LOCK_DIR = Path(ARTIFACT_DIR) / "locks"
 
 
 @dataclass
@@ -133,18 +140,44 @@ CRON_LINES = {
 }
 
 
+@contextmanager
+def _exclusive(name: str) -> Iterator[bool]:
+    """Hold a per-job lock; yield False if another run of the job already has it.
+
+    An OS-level flock rather than a pid file: the kernel releases it when the
+    holder dies, so a crashed run can never leave the job locked forever.
+    """
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_DIR / f"{name}.lock", "w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def run_job(name: str) -> dict:
     if name not in JOBS:
         raise KeyError(f"unknown job {name!r}. Known: {', '.join(sorted(JOBS))}")
     job = JOBS[name]
     started = datetime.now(UTC)
-    log.info("running job %s", name)
-    try:
-        result = job.run()
-        status = "ok"
-    except Exception as exc:  # noqa: BLE001 - a failed job is a reported outcome
-        log.exception("job %s failed", name)
-        result, status = {"error": str(exc)}, "failed"
+    with _exclusive(name) as acquired:
+        if not acquired:
+            # Overlap is expected for a 15-minute job on a slow machine, and
+            # stacking runs behind each other only makes the next one slower.
+            log.warning("job %s is already running; skipping this run", name)
+            return {"job": name, "status": "skipped", "started_at": started.isoformat(), "seconds": 0.0, "result": {}}
+        log.info("running job %s", name)
+        try:
+            result = job.run()
+            status = "ok"
+        except Exception as exc:  # noqa: BLE001 - a failed job is a reported outcome
+            log.exception("job %s failed", name)
+            result, status = {"error": str(exc)}, "failed"
     return {
         "job": name,
         "status": status,
