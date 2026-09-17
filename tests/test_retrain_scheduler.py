@@ -174,3 +174,14 @@ def test_a_job_already_running_is_skipped_not_stacked(monkeypatch):
     # Once the first run finishes the job is runnable again.
     assert run_job("slow")["status"] == "ok"
     assert calls == [1]
+
+
+def test_list_shows_the_cron_expression_beside_each_job(monkeypatch, capsys):
+    from evaluator import scheduler
+
+    monkeypatch.setattr(sys, "argv", ["scheduler", "--list"])
+    scheduler.main()
+
+    out = capsys.readouterr().out
+    assert CRON_LINES["score_universe"] in out
+    assert all(name in out for name in JOBS)

@@ -208,10 +208,10 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     if args.list:
-        print(f"{'job':<18} {'cadence':<14} description")
-        print("-" * 76)
+        print(f"{'job':<18} {'cadence':<14} {'cron':<20} description")
+        print("-" * 96)
         for job in JOBS.values():
-            print(f"{job.name:<18} {job.cadence:<14} {job.description}")
+            print(f"{job.name:<18} {job.cadence:<14} {CRON_LINES.get(job.name, '-'):<20} {job.description}")
         return
 
     if args.install_cron:
