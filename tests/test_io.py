@@ -148,3 +148,18 @@ def test_corrupt_fundamentals_cache_is_refetched_not_raised(tmp_path, monkeypatc
 
     assert Client.calls == 1
     assert frame.empty and "filed" in frame.columns
+
+
+def test_read_json_or_none_treats_missing_and_corrupt_files_as_no_state(tmp_path, caplog):
+    from evaluator.io import atomic_write_json, read_json_or_none
+
+    assert read_json_or_none(tmp_path / "absent.json") is None
+
+    good = tmp_path / "good.json"
+    atomic_write_json({"a": 1}, good)
+    assert read_json_or_none(good) == {"a": 1}
+
+    broken = tmp_path / "broken.json"
+    broken.write_text('{"a": 1')
+    assert read_json_or_none(broken) is None
+    assert "unreadable state file" in caplog.text

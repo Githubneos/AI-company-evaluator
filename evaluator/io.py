@@ -79,10 +79,28 @@ def read_parquet_or_none(path: Path | str, **kwargs: Any) -> pd.DataFrame | None
         return None
 
 
+def read_json_or_none(path: Path | str) -> Any | None:
+    """JSON state that is missing or unreadable is "no state", never an error.
+
+    Writes here are atomic, so a half-written file should not occur -- but a disk
+    that filled up, or a file edited by hand, can still leave one. Callers treat
+    None as "start from scratch" and rebuild it.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log.warning("discarding unreadable state file %s: %s", path, exc)
+        return None
+
+
 __all__ = [
     "atomic_write_bytes",
     "atomic_write_json",
     "atomic_write_parquet",
     "atomic_write_text",
+    "read_json_or_none",
     "read_parquet_or_none",
 ]
