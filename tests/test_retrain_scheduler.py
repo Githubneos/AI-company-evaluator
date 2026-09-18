@@ -185,3 +185,17 @@ def test_list_shows_the_cron_expression_beside_each_job(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert CRON_LINES["score_universe"] in out
     assert all(name in out for name in JOBS)
+
+
+class TestCorruptState:
+    def test_a_corrupt_state_file_reads_as_never_trained(self, state):
+        state.write_text('{"last_full": "2026-')
+
+        decision = rt.decide()
+
+        assert decision.should_run and decision.mode == "full"
+
+    def test_a_state_file_that_is_not_an_object_is_ignored(self, state):
+        state.write_text("[1, 2, 3]")
+
+        assert rt.decide().mode == "full"

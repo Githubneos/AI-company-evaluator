@@ -15,7 +15,6 @@ be scoring inputs that no longer resemble anything it was trained on.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 
 from evaluator.config import ARTIFACT_DIR, default_targets
-from evaluator.io import atomic_write_json
+from evaluator.io import atomic_write_json, read_json_or_none
 from evaluator.monitoring import PSI_RETRAIN_THRESHOLD, feature_drift, should_retrain
 
 log = logging.getLogger(__name__)
@@ -52,9 +51,10 @@ class RetrainDecision:
 
 
 def _load_state() -> dict:
-    if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text())
-    return {}
+    # A corrupt state file reads as "never trained", which errs toward retraining
+    # -- the safe direction -- rather than crashing the scheduler every night.
+    state = read_json_or_none(STATE_PATH)
+    return state if isinstance(state, dict) else {}
 
 
 def record_retrain(mode: str) -> None:
