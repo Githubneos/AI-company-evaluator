@@ -34,6 +34,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import numpy as np
@@ -44,7 +45,7 @@ from evaluator.features.build import FEATURE_DESCRIPTIONS
 from evaluator.features.store import FeaturePanel
 from evaluator.io import atomic_write_json
 from evaluator.metrics import brier_score, evaluate
-from evaluator.model.train import MIN_REGIME_ROWS, MODEL_DIR, PanelTrainConfig, walk_forward
+from evaluator.model.train import MIN_REGIME_ROWS, MODEL_DIR, PanelTrainConfig, WalkForwardResult, walk_forward
 from evaluator.regimes import regime_for
 
 log = logging.getLogger(__name__)
@@ -139,7 +140,12 @@ def _incremental(brier_model: float, brier_reference: float) -> float | None:
 
 
 def paired_fold_stats(
-    fold_n: np.ndarray, brier_model: np.ndarray, brier_reference: np.ndarray, *, seed: int = 0
+    fold_n: np.ndarray,
+    brier_model: np.ndarray,
+    brier_reference: np.ndarray,
+    *,
+    seed: int = 0,
+    level: float = 0.90,
 ) -> dict:
     """Fold-level comparison of the model against a reference.
 
@@ -160,6 +166,9 @@ def paired_fold_stats(
         "n_folds": int(len(fold_n)),
         "fold_mean": float(per_fold.mean()),
         "ci90": [float(np.quantile(boot, 0.05)), float(np.quantile(boot, 0.95))],
+        # A wider interval for callers that correct for multiple comparisons.
+        "ci_level": level,
+        "ci": [float(np.quantile(boot, (1 - level) / 2)), float(np.quantile(boot, 1 - (1 - level) / 2))],
     }
 
 
@@ -200,39 +209,80 @@ def verdict(
     return head + share
 
 
-def evaluate_baselines(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainConfig) -> dict:
-    """Fit every baseline on the model's own folds and compare. Writes baselines.json."""
+@dataclass
+class FittedSets:
+    """Out-of-fold predictions for several feature sets on the model's own rows."""
+
+    results: dict[str, WalkForwardResult]
+    model_proba: np.ndarray
+    meta: dict
+    y: np.ndarray
+    priors: np.ndarray
+    dates: pd.Series
+    fold_n: np.ndarray
+    spans: list[tuple[int, int]]
+
+    def fold_briers(self, proba: np.ndarray) -> np.ndarray:
+        return np.array([brier_score(self.y[a:b], proba[a:b]) for a, b in self.spans])
+
+
+def fit_feature_sets(
+    panel: FeaturePanel,
+    spec: TargetSpec,
+    cfg: PanelTrainConfig,
+    sets: dict[str, tuple[str, ...] | list[str]],
+    params: dict | None = None,
+) -> FittedSets:
+    """Fit one small model per feature set through the trained model's own folds.
+
+    Every set is checked against the saved out-of-fold rows (`_check_alignment`),
+    so anything built on the result compares predictions for identical rows.
+    """
     meta, saved = _load_model_artifacts(spec)
     stride = int(meta.get("date_stride", 1))
 
-    wanted = sorted({f for cols in BASELINE_FEATURES.values() for f in cols})
+    wanted = sorted({f for cols in sets.values() for f in cols})
     missing = [f for f in wanted if f not in panel.feature_names]
     if missing:
         raise ValueError(f"panel is missing baseline features {missing}; rebuild it with scripts.build_panel")
 
-    # A panel view holding only the baseline columns keeps the working copy small.
+    # A panel view holding only the needed columns keeps the working copy small.
     narrow = FeaturePanel(panel.frame, wanted, panel.label_names, panel.schema)
     X, y, dates, _ = narrow.target_frame(spec)
     X, y, dates = _thin_to_stride(X, y, dates, stride)
 
-    model_proba = np.asarray(saved["probabilities"], dtype=float)
-    results: dict[str, object] = {}
-    for name, cols in BASELINE_FEATURES.items():
-        log.info("%s: baseline %s on %d features", spec.name, name, len(cols))
-        wf = walk_forward(X[list(cols)], y, dates, spec, cfg, stride, params_override=BASELINE_PARAMS)
+    results: dict[str, WalkForwardResult] = {}
+    for name, cols in sets.items():
+        log.info("%s: fitting %s on %d features", spec.name, name, len(cols))
+        wf = walk_forward(X[list(cols)], y, dates, spec, cfg, stride, params_override=params or BASELINE_PARAMS)
         _check_alignment(spec, wf, saved, meta)
         results[name] = wf
         gc.collect()
 
-    # Alignment is verified, so every baseline shares these rows, folds and priors.
+    # Alignment is verified, so every set shares these rows, folds and priors.
     first = next(iter(results.values()))
-    y_oos, priors, oos_dates = first.y, first.priors, first.dates
     fold_n = np.array([f["n"] for f in first.folds])
     bounds = np.concatenate([[0], np.cumsum(fold_n)])
-    spans = list(zip(bounds[:-1], bounds[1:]))
+    return FittedSets(
+        results=results,
+        model_proba=np.asarray(saved["probabilities"], dtype=float),
+        meta=meta,
+        y=first.y,
+        priors=first.priors,
+        dates=first.dates,
+        fold_n=fold_n,
+        spans=list(zip(bounds[:-1], bounds[1:])),
+    )
 
-    def fold_briers(proba: np.ndarray) -> np.ndarray:
-        return np.array([brier_score(y_oos[a:b], proba[a:b]) for a, b in spans])
+
+def evaluate_baselines(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainConfig) -> dict:
+    """Fit every baseline on the model's own folds and compare. Writes baselines.json."""
+    fitted = fit_feature_sets(panel, spec, cfg, BASELINE_FEATURES)
+    results, meta, model_proba = fitted.results, fitted.meta, fitted.model_proba
+    y_oos, priors, oos_dates, fold_n = fitted.y, fitted.priors, fitted.dates, fitted.fold_n
+    spans, fold_briers = fitted.spans, fitted.fold_briers
+    first = next(iter(results.values()))
+    stride = int(meta.get("date_stride", 1))
 
     pooled = {"model": _skill(y_oos, model_proba, priors)}
     pooled.update({name: _skill(y_oos, wf.proba, priors) for name, wf in results.items()})

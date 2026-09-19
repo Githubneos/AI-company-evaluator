@@ -90,7 +90,11 @@ def test_validation_endpoint_carries_baselines_when_computed(monkeypatch):
     client = TestClient(serving.app)
 
     monkeypatch.setattr(serving, "load_baselines", lambda target: None)
-    assert client.get("/model/magnitude_1d/validation").json()["baselines"] is None
+    monkeypatch.setattr(serving, "load_ablations", lambda target: None)
+    body = client.get("/model/magnitude_1d/validation").json()
+    assert body["baselines"] is None and body["ablations"] is None
 
     monkeypatch.setattr(serving, "load_baselines", lambda target: {"verdict": "v"})
-    assert client.get("/model/magnitude_1d/validation").json()["baselines"] == {"verdict": "v"}
+    monkeypatch.setattr(serving, "load_ablations", lambda target: {"sets": {}})
+    body = client.get("/model/magnitude_1d/validation").json()
+    assert body["baselines"] == {"verdict": "v"} and body["ablations"] == {"sets": {}}

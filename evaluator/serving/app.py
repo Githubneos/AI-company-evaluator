@@ -23,6 +23,7 @@ from evaluator.feedback.store import feedback_context, log_prediction, resolve_p
 from evaluator.fusion import build_payload
 from evaluator.llm.evaluator import evaluate as llm_evaluate
 from evaluator.llm.provider import LLMUnavailable
+from evaluator.model.ablations import load_ablations
 from evaluator.model.baselines import load_baselines
 from evaluator.model.predict import ModelNotTrained, available_targets, load_model, score_ticker
 from evaluator.monitoring import system_report
@@ -244,6 +245,9 @@ def validation(target: str) -> dict:
         # Skill over simple volatility / earnings-cycle signals on the same
         # out-of-sample rows; null until scripts.evaluate_baselines has run.
         "baselines": load_baselines(target),
+        # Edge of each feature group over volatility alone; null until
+        # scripts.evaluate_ablations has run.
+        "ablations": load_ablations(target),
         "caveats": metadata["data_caveats"],
     }
 

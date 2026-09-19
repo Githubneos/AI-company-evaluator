@@ -132,17 +132,67 @@ What this says, plainly:
   standalone predictive power.
 - **More features made the small model worse on four targets.** Adding the
   earnings and VIX features to the volatility set lowers skill for every
-  direction model and for `magnitude_20d`. VIX level is the likelier culprit
-  (a non-stationary level that does not generalise across regimes), but this
-  run does not isolate it.
+  direction model and for `magnitude_20d`. The ablation study below traces this
+  to the macro group as a whole: dropping the VIX level alone does not help.
 
 Consequence: until a feature set beats the volatility baseline, treat these
-models as volatility forecasters. The next work is feature pruning (start by
-dropping VIX level and testing whether the event and fundamentals blocks earn
-their place, with VIX ablated on its own), not more features.
+models as volatility forecasters. The ablation study below shows where to cut.
 
 ```bash
 python -m scripts.evaluate_baselines --targets magnitude_1d   # ~2 min, ~0.7 GB
+```
+
+### Which feature groups earn their place
+
+`scripts.evaluate_ablations` adds one feature group at a time to the four
+volatility features, fits small trees on the same 17 folds, and scores each set
+on the model's own out-of-fold rows. A group **earns its place** only if its
+edge over volatility alone is at least +0.002 Brier, its interval excludes zero
+after a Bonferroni correction across the seven comparisons (98.6% intervals),
+and it wins at least 70% of folds. Without those guards, a pure-noise group
+cleared a plain 90% interval in synthetic tests, so they are enforced in code
+and covered by a five-seed test.
+
+Brier edge over volatility alone (✓ earns its place, ✗ hurts: interval below zero):
+
+| group added | magnitude_1d | magnitude_5d | magnitude_20d | direction_1d | direction_5d | direction_20d |
+|---|---|---|---|---|---|---|
+| SEC events | **+0.0051 ✓** | **+0.0125 ✓** | **+0.0145 ✓** | −0.0005 | **+0.0071 ✓** | **+0.0096 ✓** |
+| technical & returns | **+0.0090 ✓** | +0.0041 | −0.0017 | +0.0044 | +0.0016 | −0.0020 |
+| sector-relative | −0.0011 | −0.0011 | −0.0016 | −0.0035 ✗ | −0.0013 | −0.0019 ✗ |
+| fundamentals | −0.0024 ✗ | −0.0005 | −0.0022 | −0.0041 ✗ | −0.0011 | −0.0026 |
+| macro & regime | −0.0039 | **−0.0097 ✗** | **−0.0205 ✗** | **−0.0205 ✗** | **−0.0146 ✗** | −0.0078 |
+| macro without VIX level | −0.0048 | −0.0095 ✗ | −0.0202 ✗ | −0.0197 ✗ | −0.0154 ✗ | −0.0057 |
+| all 44, small trees | +0.0070 | +0.0068 ✓ | −0.0003 | −0.0096 ✗ | −0.0043 | +0.0026 |
+| *production model* | *+0.0066* | *+0.0077 ✓* | *+0.0009* | *−0.0098 ✗* | *−0.0046* | *+0.0002* |
+
+What this says:
+
+- **SEC event timing is the one group with real, consistent value.** It earns
+  its place on five of six targets. It is also the only group that consistently beats
+  the production model: volatility + events alone (14 features, small trees)
+  scores +0.0429 vs +0.0382 on `magnitude_5d`, +0.0424 vs +0.0292 on
+  `magnitude_20d`, +0.0270 vs +0.0156 on `direction_5d`, and +0.0264 vs
+  +0.0171 on `direction_20d`.
+- **Macro features actively hurt.** They lower skill on all six targets, significantly on
+  four, by up to −0.02 Brier. Removing the VIX level does not fix it. That corrects the hypothesis in the
+  section above. The likely mechanism is regime-level features that
+  identify *when* a training year happened rather than anything that
+  generalises forward, but that is an interpretation; the measurement is the harm.
+- **Fundamentals and sector-relative features add nothing and sometimes hurt.**
+- **Depth is not the problem.** All 44 features with small trees score about the
+  same as the deep production model, so the harm comes from the feature
+  groups, not from overfitting capacity.
+- **Technical features help only `magnitude_1d`.**
+
+The recommended feature sets (`recommended_features` in each target's
+`ablations.json`) are volatility + events, plus technical for `magnitude_1d`,
+and volatility alone for `direction_1d`. Retraining on these goes through the
+promotion gate in the planned rebuild; nothing is swapped into production on
+the strength of this table alone.
+
+```bash
+python -m scripts.evaluate_ablations --targets magnitude_20d   # ~8 min, ~1.5 GB
 ```
 
 ## Known defects

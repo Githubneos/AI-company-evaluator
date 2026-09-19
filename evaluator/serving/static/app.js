@@ -196,7 +196,7 @@
     $$("[data-to]", root).forEach(countUp);
     // Two frames: the first commits the start state, the second transitions away from it.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      $$(".stack, .drivers, .fold-spark", root).forEach((el) => el.classList.add("grown"));
+      $$(".stack, .drivers, .fold-spark, .abl", root).forEach((el) => el.classList.add("grown"));
       $$(".ring", root).forEach((ring) => {
         const v = $(".value", ring);
         if (v) v.style.strokeDashoffset = v.dataset.offset;
@@ -1195,7 +1195,7 @@
     const b = r.baselines;
     const inc = b && b.incremental && b.incremental[`vs_${b.reference}`];
     if (!inc || !isNum(inc.pooled)) return "";
-    return `<dt title="Brier skill over the strongest of three small baselines (volatility; earnings cycle; both plus VIX), same out-of-sample rows">Over best baseline (${esc(b.reference)})</dt>
+    return `<dt title="Brier skill over the strongest of three small baselines (volatility; earnings cycle; both plus VIX), same out-of-sample rows. Best baseline here: ${esc(b.reference)}">Over best baseline</dt>
       <dd class="num ${inc.ci90 && inc.ci90[0] > 0 ? "pos" : inc.pooled < 0 ? "neg" : "warn"}">${signed(inc.pooled, 4)}</dd>`;
   }
 
@@ -1236,6 +1236,71 @@
             const a = Math.min(1, Math.abs(x) / 0.04);
             return `<td class="cell" style="background:color-mix(in srgb, ${x >= 0 ? "var(--pos)" : "var(--neg)"} ${(8 + a * 42).toFixed(0)}%, transparent)" title="n=${b.by_regime[k].n.toLocaleString()}">${signed(x, 4)}</td>`;
           }).join("")}</tr></tbody></table></div>` : ""}
+      </section>`;
+  }
+
+  const ABL_VERDICT = {
+    "earns its place": "chip-pos",
+    "small, inconsistent gain": "chip-warn",
+    hurts: "chip-neg",
+    "no measurable effect": "",
+    reference: "chip-accent",
+  };
+
+  function ablationLabel(name, labels) {
+    if (name === "vol") return ["Volatility only", "reference"];
+    if (name === "all") return ["All features", "small trees"];
+    if (name === "vol+macro-vix_level") return ["+ Macro without VIX level", "vol + macro \u2212 vix"];
+    const group = name.replace("vol+", "");
+    return [`+ ${labels[group] || group}`, `vol + ${group}`];
+  }
+
+  function ablationCard(r) {
+    const a = r.ablations;
+    if (!a) {
+      return `<section class="card span-12"><div class="card-head"><div><h2 class="card-title">${ICON.heat} Which feature groups earn their place</h2>
+        <p class="card-sub">Not computed yet. Run <code class="mono">python -m scripts.evaluate_ablations --targets ${esc(r.target)}</code>.</p></div></div></section>`;
+    }
+    const rows = [...Object.entries(a.sets), ["__model__", a.model]];
+    const bounds = rows.flatMap(([, x]) => [x.edge_vs_vol.ci[0], x.edge_vs_vol.ci[1], x.edge_vs_vol.pooled]).filter(isNum);
+    const m = Math.max(0.004, ...bounds.map(Math.abs)) * 1.08;
+    const pct = (v) => ((v + m) / (2 * m)) * 100;
+    const ticks = [-m, -m / 2, 0, m / 2, m];
+    const body = rows.map(([name, x], i) => {
+      const e = x.edge_vs_vol;
+      const isModel = name === "__model__";
+      const isRef = name === a.reference;
+      const [label, sub] = isModel ? ["Production model", "44 features, deep trees"] : ablationLabel(name, a.group_labels || {});
+      const v = e.pooled;
+      const cls = isRef ? "flat" : v >= 0 ? "up" : "down";
+      const left = v >= 0 ? pct(0) : pct(v);
+      const width = Math.max(isRef ? 0.6 : 0, Math.abs(pct(v) - pct(0)));
+      const verdict = isModel ? (e.ci[0] > 0 ? "earns its place" : e.ci[1] < 0 ? "hurts" : "no measurable effect") : x.verdict;
+      return `
+        <div class="abl-row ${isRef ? "ref" : ""} ${isModel ? "prod" : ""}" style="--i:${i}">
+          <div class="abl-name">${esc(label)}<small>${esc(sub)}${x.n_features ? ` \u00b7 ${x.n_features}` : ""}</small></div>
+          <div class="abl-track" style="--zero:${pct(0).toFixed(2)}%"
+               title="Edge over volatility: ${signed(v, 4)} Brier (adjusted ${Math.round((a.ci_level || 0.9) * 100)}% CI ${signed(e.ci[0], 4)} to ${signed(e.ci[1], 4)}), better in ${e.fold_wins}/${e.n_folds} folds">
+            <span class="abl-bar ${cls}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%;transition-delay:${i * 50}ms"></span>
+            ${isRef ? "" : `<span class="abl-whisker" style="left:${pct(e.ci[0]).toFixed(2)}%;width:${Math.max(0.4, pct(e.ci[1]) - pct(e.ci[0])).toFixed(2)}%"></span>`}
+          </div>
+          <div class="abl-stat">
+            <span class="mono small ${isRef ? "muted" : toneOf(v, 0.0005)}">${isRef ? "\u00b10" : signed(v, 4)}${isRef ? "" : ` <span class="muted xs">${e.fold_wins}/${e.n_folds}</span>`}</span>
+            <span class="chip ${ABL_VERDICT[verdict] ?? ""}" style="height:20px">${esc(verdict)}</span>
+          </div>
+        </div>`;
+    }).join("");
+    const earns = a.groups_that_earn_their_place || [];
+    return `
+      <section class="card span-12">
+        <div class="card-head"><div><h2 class="card-title">${ICON.heat} Which feature groups earn their place</h2>
+          <p class="card-sub">Brier edge over volatility alone when each group is added, on the model\u2019s own out-of-sample rows.
+            Whiskers are ${Math.round((a.ci_level || 0.9) * 1000) / 10}% intervals (Bonferroni-adjusted across groups); \u201cearns its place\u201d also needs \u2265${signed(a.min_edge ?? 0.002, 3)} and 70% of folds.</p></div></div>
+        <div class="abl-axis" aria-hidden="true"><span></span><div class="ticks">${ticks.map((t) => `<span style="left:${pct(t).toFixed(2)}%">${signed(t, 3)}</span>`).join("")}</div><span></span></div>
+        <div class="abl">${body}</div>
+        <div class="verdict ${earns.length ? "good" : "bad"}" style="margin-top:14px">${earns.length ? ICON.check : ICON.alert}
+          <div><strong>${earns.length ? `Groups that earn their place: ${esc(earns.map((g) => (a.group_labels || {})[g] || g).join(", "))}` : "No feature group earns its place over volatility"}</strong>
+          <span class="muted">Recommended feature set: ${esc((a.recommended_features || []).length)} features \u2014 <span class="mono xs">${esc((a.recommended_features || []).join(", "))}</span></span></div></div>
       </section>`;
   }
 
@@ -1287,8 +1352,9 @@
         <div id="calib-host">${calibChart(pooled.calibration[state.calibClass] || [])}</div>
       </section>
       ${baselineCard(r)}
+      ${ablationCard(r)}
       <section class="card span-12">
-        <div class="stats">
+        <div class="stats stats-3">
           <div class="stat"><span class="eyebrow">Train window</span><span class="num" style="font-size:16px">${esc(r.train_start)} → ${esc(r.train_end)}</span></div>
           <div class="stat"><span class="eyebrow">Train rows</span>${num(r.train_rows, "int")}</div>
           <div class="stat"><span class="eyebrow">Tickers</span>${num(Array.isArray(r.train_tickers) ? r.train_tickers.length : r.train_tickers, "int")}</div>
