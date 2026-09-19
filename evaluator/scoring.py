@@ -21,7 +21,7 @@ import pandas as pd
 
 from evaluator.config import ARTIFACT_DIR, MAGNITUDE, TargetSpec
 from evaluator.data.universe import load_universe
-from evaluator.io import atomic_write_json, atomic_write_parquet, read_parquet_or_none
+from evaluator.io import atomic_write_json, atomic_write_parquet, read_json_or_none, read_parquet_or_none
 from evaluator.model.predict import ModelNotTrained, available_targets, score_ticker
 
 log = logging.getLogger(__name__)
@@ -155,9 +155,8 @@ def score_universe(
 
 
 def latest_summary() -> dict | None:
-    import json
-
-    return json.loads(LATEST_PATH.read_text()) if LATEST_PATH.exists() else None
+    summary = read_json_or_none(LATEST_PATH)
+    return summary if isinstance(summary, dict) else None
 
 
 def load_scores(as_of: str | None = None) -> pd.DataFrame | None:

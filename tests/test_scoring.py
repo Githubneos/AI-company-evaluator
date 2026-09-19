@@ -118,3 +118,11 @@ def test_leaderboard_without_a_run_says_so(scores_dir):
 
     assert board["available"] is False
     assert "score_universe" in board["reason"] and board["rows"] == []
+
+
+def test_a_corrupt_latest_pointer_reads_as_no_scored_universe(scores_dir):
+    (scores_dir / "latest.json").write_text('{"as_of": "2026-09')
+
+    assert scoring.latest_summary() is None
+    board = scoring.leaderboard()
+    assert board["available"] is False and board["rows"] == []
