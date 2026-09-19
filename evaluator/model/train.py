@@ -174,9 +174,10 @@ def _fit_fold(
     spec: TargetSpec,
     cfg: PanelTrainConfig,
     stride: int = 1,
+    params_override: dict | None = None,
 ) -> lgb.Booster:
     """Fit one fold, holding out the tail of the training block for stopping."""
-    params = cfg.lgb_params(spec)
+    params = {**cfg.lgb_params(spec), **(params_override or {})}
     train_dates = dates.iloc[train_idx]
     unique = train_dates.unique()
 
@@ -257,24 +258,33 @@ def _regime_report(
     return report
 
 
-def train_target(
-    panel: FeaturePanel,
+@dataclass
+class WalkForwardResult:
+    """Out-of-fold output of one purged walk-forward run."""
+
+    folds: list[dict]
+    best_iterations: list[int]
+    y: np.ndarray
+    proba: np.ndarray
+    dates: pd.Series
+    #: One baseline class distribution per row, from that row's training fold.
+    priors: np.ndarray
+
+
+def walk_forward(
+    X: pd.DataFrame,
+    y: pd.Series,
+    dates: pd.Series,
     spec: TargetSpec,
     cfg: PanelTrainConfig,
-    *,
-    final_init_model: str | None = None,
-) -> dict:
-    """Walk-forward evaluate then fit a final model for one target."""
-    X, y, dates, tickers = panel.target_frame(spec)
-    X, y, dates, tickers, stride = _thin_by_date(X, y, dates, tickers, cfg.max_train_rows)
-    log.info(
-        "%s: %s rows, %s tickers%s",
-        spec.name,
-        f"{len(X):,}",
-        tickers.nunique(),
-        f" (kept every {stride} dates)" if stride > 1 else "",
-    )
+    stride: int = 1,
+    params_override: dict | None = None,
+) -> WalkForwardResult:
+    """Purged, embargoed walk-forward evaluation of one target.
 
+    Shared by training and by the baseline ablations, so a baseline is scored
+    on exactly the folds, rows and early-stopping scheme the real model was.
+    """
     # `split_panel` counts *retained* dates, so every window expressed in trading
     # days has to be rescaled by the stride. Skipping this would silently turn a
     # one-year test fold into a `stride`-year one and shrink the purge gap below
@@ -291,7 +301,7 @@ def train_target(
     oos_true, oos_proba, oos_dates, oos_priors = [], [], [], []
 
     for i, (train_idx, test_idx) in enumerate(splitter.split_panel(dates)):
-        booster = _fit_fold(X, y, dates, train_idx, spec, cfg, stride)
+        booster = _fit_fold(X, y, dates, train_idx, spec, cfg, stride, params_override)
         proba = _as_proba(
             booster.predict(X.iloc[test_idx], num_iteration=booster.best_iteration or None),
             spec.n_classes,
@@ -325,13 +335,40 @@ def train_target(
             metrics["brier_skill"] if metrics["brier_skill"] is not None else float("nan"),
         )
 
-    all_true = np.concatenate(oos_true)
-    all_proba = np.vstack(oos_proba)
-    all_dates = pd.concat(oos_dates)
-    all_priors = np.vstack(oos_priors)
+    return WalkForwardResult(
+        folds=folds,
+        best_iterations=best_iterations,
+        y=np.concatenate(oos_true),
+        proba=np.vstack(oos_proba),
+        dates=pd.concat(oos_dates),
+        priors=np.vstack(oos_priors),
+    )
+
+
+def train_target(
+    panel: FeaturePanel,
+    spec: TargetSpec,
+    cfg: PanelTrainConfig,
+    *,
+    final_init_model: str | None = None,
+) -> dict:
+    """Walk-forward evaluate then fit a final model for one target."""
+    X, y, dates, tickers = panel.target_frame(spec)
+    X, y, dates, tickers, stride = _thin_by_date(X, y, dates, tickers, cfg.max_train_rows)
+    log.info(
+        "%s: %s rows, %s tickers%s",
+        spec.name,
+        f"{len(X):,}",
+        tickers.nunique(),
+        f" (kept every {stride} dates)" if stride > 1 else "",
+    )
+
+    wf = walk_forward(X, y, dates, spec, cfg, stride)
+    folds, best_iterations = wf.folds, wf.best_iterations
+    all_true, all_proba, all_dates = wf.y, wf.proba, wf.dates
     overall_priors = _priors(y.to_numpy(), spec.n_classes)
 
-    pooled = evaluate(all_true, all_proba, all_priors)
+    pooled = evaluate(all_true, all_proba, wf.priors)
     pooled["calibration"] = {
         spec.class_names[c]: calibration_bins(all_true, all_proba, c)
         for c in range(spec.n_classes)

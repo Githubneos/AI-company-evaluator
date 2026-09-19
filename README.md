@@ -92,6 +92,59 @@ baseline predicting historical class priors, computed per fold from that fold's
 own training window. The fusion payload states in plain language whether a model
 clears it, and the LLM is instructed to say so rather than narrate noise.
 
+### Against stronger baselines — most of the skill is volatility
+
+Class priors are the weakest possible baseline. `scripts.evaluate_baselines`
+fits three small models on the **same 17 folds and the identical out-of-sample
+rows** (a guard refuses the comparison otherwise): volatility only (`vol_20`,
+`vol_60`, `vol_ratio_20_60`, `atr_14_pct`), earnings cycle only (days since the
+last earnings release and periodic report), and both plus VIX. Each 44-feature
+model is then compared with whichever baseline is strongest on its target.
+
+| target | model | vol only | earnings only | vol + earn + VIX | edge over best | 90% CI (folds) | folds won |
+|---|---|---|---|---|---|---|---|
+| magnitude_1d | +0.0435 | +0.0371 | +0.0070 | +0.0391 | +0.0045 | +0.0006..+0.0086 | 11/17 |
+| magnitude_5d | +0.0382 | +0.0308 | +0.0132 | +0.0354 | +0.0029 | −0.0024..+0.0087 | 7/17 |
+| magnitude_20d | +0.0292 | +0.0284 | +0.0145 | +0.0250 | +0.0009 | −0.0071..+0.0085 | 12/17 |
+| direction_1d | +0.0158 | **+0.0253** | +0.0037 | +0.0090 | **−0.0098** | −0.0136..−0.0058 | 2/17 |
+| direction_5d | +0.0156 | **+0.0201** | +0.0077 | +0.0136 | −0.0046 | −0.0112..+0.0019 | 7/17 |
+| direction_20d | +0.0171 | +0.0169 | +0.0093 | +0.0136 | +0.0002 | −0.0076..+0.0099 | 6/17 |
+
+All columns except "edge" are Brier skill against class priors. "Edge" is the
+model's Brier skill *over* the best baseline, with a 90% interval from
+resampling folds (rows within a fold are not independent).
+
+What this says, plainly:
+
+- **The headline skill is mostly volatility clustering.** A four-feature
+  volatility model reaches 81–99% of the skill of the four models it doesn't
+  beat outright, and it beats the other two. The remaining 40 features (events,
+  fundamentals, sector-relative returns, technicals, macro) add at most +0.0045
+  Brier on any target.
+- **Only `magnitude_1d` has an edge whose interval excludes zero**, and it is
+  small (+0.0045) and inconsistent (11/17 folds).
+- **`direction_1d` is dominated.** The volatility-only model beats it in 15/17
+  folds, and the interval lies entirely below zero. `direction_5d` loses too.
+  The full model is worse than a subset of its own inputs: the extra features
+  are fitting noise.
+- **The earnings clock alone is weak** (+0.004 to +0.015). It often ranks high
+  in the SHAP attributions, but that prominence does not translate into
+  standalone predictive power.
+- **More features made the small model worse on four targets.** Adding the
+  earnings and VIX features to the volatility set lowers skill for every
+  direction model and for `magnitude_20d`. VIX level is the likelier culprit
+  (a non-stationary level that does not generalise across regimes), but this
+  run does not isolate it.
+
+Consequence: until a feature set beats the volatility baseline, treat these
+models as volatility forecasters. The next work is feature pruning (start by
+dropping VIX level and testing whether the event and fundamentals blocks earn
+their place, with VIX ablated on its own), not more features.
+
+```bash
+python -m scripts.evaluate_baselines --targets magnitude_1d   # ~2 min, ~0.7 GB
+```
+
 ## Known defects
 
 - **Survivorship bias.** The universe is today's S&P 500. Firms that failed or
