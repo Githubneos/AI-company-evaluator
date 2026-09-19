@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
@@ -95,7 +95,7 @@ def _parse_time(value) -> datetime | None:
     except (ValueError, TypeError):
         return None
     if stamp.tzinfo is None:
-        stamp = stamp.tz_localize(timezone.utc)
+        stamp = stamp.tz_localize(UTC)
     return stamp.to_pydatetime()
 
 
@@ -184,7 +184,7 @@ def collect_news(ticker: str, cik: int | None = None) -> NewsBatch:
             log.warning("EDGAR feed failed for %s: %s", ticker, exc)
             batch.sources_ok["edgar"] = False
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if batch.articles:
         newest = max(a.published for a in batch.articles)
         batch.newest_age_hours = round((now - newest).total_seconds() / 3600, 2)

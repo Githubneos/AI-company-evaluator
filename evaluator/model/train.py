@@ -51,7 +51,7 @@ MLFLOW_DB = Path(ARTIFACT_DIR) / "mlflow.db"
 MIN_REGIME_ROWS = 250
 
 
-def _log_to_mlflow(spec: TargetSpec, cfg: "PanelTrainConfig", metadata: dict) -> None:
+def _log_to_mlflow(spec: TargetSpec, cfg: PanelTrainConfig, metadata: dict) -> None:
     """Experiment tracking (spec 7), local file backend -- no server to run.
 
     Worth having because this system retrains on a schedule: without a record of

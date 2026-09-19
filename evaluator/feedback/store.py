@@ -21,7 +21,7 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -90,7 +90,7 @@ def log_prediction(score: dict, *, db_path: Path | str = DB_PATH) -> str:
             (
                 prediction_id,
                 score["ticker"],
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 score["as_of"],
                 score["horizon_days"],
                 score["threshold_sigmas"],
@@ -176,7 +176,7 @@ def resolve_pending(
                  WHERE prediction_id = ?
                 """,
                 (
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                     actual_return,
                     actual_z,
                     actual_class,

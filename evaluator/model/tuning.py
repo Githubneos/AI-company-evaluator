@@ -78,7 +78,7 @@ def tune(
     splits = list(splitter.split_panel(dates))
     history: list[dict] = []
 
-    def objective(trial: "optuna.Trial") -> float:
+    def objective(trial: optuna.Trial) -> float:
         params = {
             # Ranges from spec 3.2. max_depth is capped low on purpose: the
             # effective sample size here is regimes, not rows.

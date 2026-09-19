@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -58,7 +58,7 @@ def _load_state() -> dict:
 
 def record_retrain(mode: str) -> None:
     state = _load_state()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     state["last_" + mode] = now
     if mode == "full":
         state["last_incremental"] = now  # a full retrain subsumes an incremental
@@ -70,7 +70,7 @@ def _days_since(state: dict, key: str) -> float | None:
     stamp = state.get(key)
     if not stamp:
         return None
-    return (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds() / 86400
+    return (datetime.now(UTC) - datetime.fromisoformat(stamp)).total_seconds() / 86400
 
 
 def decide(panel_frame: pd.DataFrame | None = None, feature_names: list[str] | None = None) -> RetrainDecision:

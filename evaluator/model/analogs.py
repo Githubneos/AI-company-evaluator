@@ -136,7 +136,9 @@ def build_index(panel_frame: pd.DataFrame, max_rows: int = 400_000, seed: int = 
     keep = ["ticker", "date", "forward_return_5d", "forward_return_20d", "label_direction_5d"]
     keep = [c for c in keep if c in panel_frame.columns]
 
-    frame = panel_frame[panel_frame["label_direction_5d"].notna()] if "label_direction_5d" in panel_frame else panel_frame
+    frame = panel_frame
+    if "label_direction_5d" in panel_frame:
+        frame = panel_frame[panel_frame["label_direction_5d"].notna()]
     if len(frame) > max_rows:
         frame = frame.sample(max_rows, random_state=seed)
     frame = frame.sort_values("date").reset_index(drop=True)

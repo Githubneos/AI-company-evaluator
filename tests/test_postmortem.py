@@ -11,8 +11,8 @@ import pandas as pd
 import pytest
 
 from evaluator.feedback import postmortem as pm
-from evaluator.feedback.store import log_prediction, resolve_pending
 from evaluator.feedback.postmortem import TAGS, rule_tags, tag_predictions, tag_summary
+from evaluator.feedback.store import log_prediction, resolve_pending
 from evaluator.llm.provider import LLMResponse
 
 

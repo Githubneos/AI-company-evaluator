@@ -172,12 +172,27 @@ python -m scripts.evaluate_baselines --targets magnitude_1d   # ~2 min, ~0.7 GB
 ## Setup
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" -c requirements.lock
 export GEMINI_API_KEY=...        # or ANTHROPIC_API_KEY; LLM_PROVIDER picks
 ```
 
 Keys are read from the environment only — never written to source, config,
 artifacts, or the prediction database.
+
+`requirements.lock` pins the exact versions behind the results above. Install
+with it: a LightGBM or pandas upgrade can move every metric without any code
+change. After deliberately upgrading, regenerate it (`pip freeze
+--exclude-editable`, keeping the header), retrain, and re-run the baselines.
+
+## Development
+
+```bash
+pytest -q          # ~20 s, no network or trained artifacts needed
+ruff check .       # lint (config in pyproject.toml)
+```
+
+CI (`.github/workflows/ci.yml`) runs both on every pull request and on pushes
+to `main`, installing from `requirements.lock` with CPU-only torch.
 
 ## Build the system
 
@@ -192,12 +207,14 @@ uvicorn evaluator.serving.app:app --reload
 ## API
 
 ```
+GET  /                            browser dashboard
 GET  /score/{ticker}              raw model output, all targets
 GET  /payload/{ticker}            fusion payload, no LLM call and no cost
 GET  /evaluate/{ticker}           full pipeline through the written evaluation
 GET  /sentiment/{ticker}          news sentiment with staleness flag
 GET  /analogs/{ticker}            closest historical situations and outcomes
-GET  /model/{target}/validation   per-fold and per-regime metrics, calibration
+GET  /prices/{ticker}             recent daily closes, for charting
+GET  /model/{target}/validation   per-fold and per-regime metrics, calibration, baselines
 GET  /monitoring                  feedback health, drift, post-mortem tags
 POST /feedback/resolve            close out elapsed prediction windows
 ```

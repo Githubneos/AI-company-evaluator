@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import UTC
 
 from evaluator.sentiment.finbert import Score, score_texts
 from evaluator.sentiment.news import Article, NewsBatch
@@ -73,9 +74,9 @@ def _age_hours(article: Article, now) -> float:
 
 
 def aggregate(batch: NewsBatch, *, use_cache: bool = True) -> SentimentResult:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if not batch.articles:
         return SentimentResult(

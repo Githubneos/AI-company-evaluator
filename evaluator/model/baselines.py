@@ -34,7 +34,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -278,7 +278,7 @@ def evaluate_baselines(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainCon
 
     report = {
         "target": spec.name,
-        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "computed_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "model_schema": meta.get("schema"),
         "date_stride": stride,
         "n_rows": int(len(y_oos)),

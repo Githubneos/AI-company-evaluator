@@ -60,7 +60,9 @@ def test_unreadable_price_cache_is_refetched_and_rewritten_atomically(tmp_path, 
 
 def test_edgar_refresh_bypasses_an_existing_cache(tmp_path, monkeypatch):
     client = EdgarClient(cache_dir=tmp_path)
-    cached = pd.DataFrame(columns=["cik", "ticker", "form", "filing_date", "acceptance_datetime", "report_date", "items", "accession"])
+    cached = pd.DataFrame(
+        columns=["cik", "ticker", "form", "filing_date", "acceptance_datetime", "report_date", "items", "accession"]
+    )
     cached.to_parquet(tmp_path / "TEST.parquet")
     monkeypatch.setattr(client, "_get_json", lambda url: None)
     assert client.filings(1, "TEST", use_cache=True, refresh=False).empty

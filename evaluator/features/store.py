@@ -118,7 +118,8 @@ def build_panel(
         # survivorship-biased (only CRSP can fix that), but this removes the
         # separate, avoidable look-ahead from treating today's constituents as
         # members in years before their actual inclusion.
-        date_added = load_universe().loc[lambda u: u["ticker"] == ticker, "date_added"]
+        universe = load_universe()
+        date_added = universe.loc[universe["ticker"] == ticker, "date_added"]
         if not date_added.empty and pd.notna(date_added.iloc[0]):
             block = block[block["date"] >= date_added.iloc[0]]
         if block.empty:

@@ -14,7 +14,6 @@ are usually the volatile ones where being right matters most.
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from evaluator.monitoring import (
     PSI_RETRAIN_THRESHOLD,

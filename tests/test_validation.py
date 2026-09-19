@@ -4,7 +4,6 @@ import pytest
 
 from evaluator.validation import PurgedWalkForward
 
-
 SPLITTER = PurgedWalkForward(n_splits=4, test_size=50, purge=5, embargo=10)
 N = 1000
 

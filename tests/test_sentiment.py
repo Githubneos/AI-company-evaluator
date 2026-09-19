@@ -10,7 +10,7 @@ rather than a confident neutral reading. A broken news API that silently reports
 reasoning layer downstream will faithfully explain the calm.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -21,7 +21,7 @@ from evaluator.sentiment.news import Article, NewsBatch
 
 
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def article(title="Company beats expectations", hours_ago=1.0, source="Reuters", kind="news"):

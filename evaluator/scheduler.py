@@ -19,9 +19,9 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ def run_job(name: str) -> dict:
     if name not in JOBS:
         raise KeyError(f"unknown job {name!r}. Known: {', '.join(sorted(JOBS))}")
     job = JOBS[name]
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     log.info("running job %s", name)
     try:
         result = job.run()
@@ -133,7 +133,7 @@ def run_job(name: str) -> dict:
         "job": name,
         "status": status,
         "started_at": started.isoformat(),
-        "seconds": round((datetime.now(timezone.utc) - started).total_seconds(), 2),
+        "seconds": round((datetime.now(UTC) - started).total_seconds(), 2),
         "result": result,
     }
 

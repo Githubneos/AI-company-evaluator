@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 OHLCV = ["open", "high", "low", "close", "volume"]
 
 
-def _cache_path(ticker: str, start: str, end: str | None) -> "object":
+def _cache_path(ticker: str, start: str, end: str | None) -> object:
     safe = ticker.replace("^", "idx_").replace("/", "_")
     return CACHE_DIR / f"{safe}__{start}__{end or 'latest'}.parquet"
 

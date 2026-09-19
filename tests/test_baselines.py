@@ -137,10 +137,14 @@ def test_verdict_never_calls_a_zero_edge_skill():
     assert "not distinguishable from zero" in text
     assert "88% of its skill" in text
 
-    inconsistent = baselines.verdict(0.0435, 0.0391, {"pooled": 0.0045, "ci90": [0.0006, 0.0086], "fold_wins": 11, "n_folds": 17}, "vol")
+    inconsistent = baselines.verdict(
+        0.0435, 0.0391, {"pooled": 0.0045, "ci90": [0.0006, 0.0086], "fold_wins": 11, "n_folds": 17}, "vol"
+    )
     assert inconsistent.startswith("Small but real edge") and "11/17" in inconsistent
     assert "not distinguishable" not in inconsistent
 
-    worse = baselines.verdict(0.0158, 0.0253, {"pooled": -0.01, "ci90": [-0.02, 0.0], "fold_wins": 3, "n_folds": 17}, "vol")
+    worse = baselines.verdict(
+        0.0158, 0.0253, {"pooled": -0.01, "ci90": [-0.02, 0.0], "fold_wins": 3, "n_folds": 17}, "vol"
+    )
     assert worse.startswith("Worse than the best simple baseline (volatility-only)")
     assert "scores higher (+0.0253 vs +0.0158)" in worse

@@ -26,7 +26,6 @@ import json
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from evaluator.feedback.store import DB_PATH, connect
@@ -68,7 +67,7 @@ def _vix_move(as_of: pd.Timestamp, horizon: int) -> float | None:
 def _untagged_events(ticker: str, as_of: pd.Timestamp, horizon: int) -> bool:
     """Did an 8-K land in the window whose item code the taxonomy cannot express?"""
     from evaluator.data.universe import cik_for
-    from evaluator.events import UNPOPULATED_TYPES, classify_item, parse_items
+    from evaluator.events import classify_item, parse_items
 
     cik = cik_for(ticker)
     if cik is None:
