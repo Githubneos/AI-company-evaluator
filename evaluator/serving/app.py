@@ -11,8 +11,11 @@ train/serve skew (spec 2.5).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from evaluator.data.universe import cik_for, load_universe
 from evaluator.feedback.postmortem import tag_summary
@@ -20,6 +23,7 @@ from evaluator.feedback.store import feedback_context, log_prediction, resolve_p
 from evaluator.fusion import build_payload
 from evaluator.llm.evaluator import evaluate as llm_evaluate
 from evaluator.llm.provider import LLMUnavailable
+from evaluator.model.baselines import load_baselines
 from evaluator.model.predict import ModelNotTrained, available_targets, load_model, score_ticker
 from evaluator.monitoring import system_report
 
@@ -34,9 +38,31 @@ app = FastAPI(
     version="0.2.0",
 )
 
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    """Make browsers revalidate dashboard assets (cheap 304s) so edits show up on reload."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+# Must match the lookback `score_ticker` uses, so the price chart reads the same
+# cached bars scoring already fetched instead of writing a second cache file.
+PRICE_LOOKBACK_START = "2015-01-01"
+
 
 def _not_found(exc: Exception) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """The browser dashboard. Everything it shows comes from the JSON endpoints below."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")
@@ -50,10 +76,31 @@ def universe() -> dict:
     return {
         "count": int(len(frame)),
         "sectors": frame["sector"].value_counts().to_dict(),
+        "tickers": frame[["ticker", "name", "sector"]].to_dict(orient="records"),
         "caveat": (
             "Today's S&P 500 constituents. Survivorship-biased: firms that "
             "failed or were removed are absent, so downside frequencies are a floor."
         ),
+    }
+
+
+@app.get("/prices/{ticker}")
+def prices(ticker: str, days: int = Query(260, ge=5, le=2520)) -> dict:
+    """Recent daily closes, for charting. Not an input to any model."""
+    from evaluator.data.sources import load_prices
+
+    ticker = ticker.upper()
+    try:
+        frame = load_prices(ticker, PRICE_LOOKBACK_START)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"price fetch failed: {exc}") from exc
+    if frame.empty:
+        raise HTTPException(status_code=404, detail=f"no price history for {ticker}")
+    close = frame["close"].dropna().iloc[-days:]
+    return {
+        "ticker": ticker,
+        "dates": [d.strftime("%Y-%m-%d") for d in close.index],
+        "close": [round(float(v), 4) for v in close],
     }
 
 
@@ -87,6 +134,8 @@ def payload(
         )
     except ModelNotTrained as exc:
         raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/sentiment/{ticker}")
@@ -110,6 +159,8 @@ def analogs_only(ticker: str, k: int = Query(5, ge=1, le=25)) -> dict:
         )
     except ModelNotTrained as exc:
         raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result["historical_analogs"]
 
 
@@ -135,6 +186,8 @@ def evaluate(
         )
     except ModelNotTrained as exc:
         raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     prediction_id = None
     if log_prediction_row:
@@ -188,6 +241,9 @@ def validation(target: str) -> dict:
         "train_rows": metadata["train_rows"],
         "train_tickers": metadata["train_tickers"],
         "validation": metadata["validation"],
+        # Skill over simple volatility / earnings-cycle signals on the same
+        # out-of-sample rows; null until scripts.evaluate_baselines has run.
+        "baselines": load_baselines(target),
         "caveats": metadata["data_caveats"],
     }
 

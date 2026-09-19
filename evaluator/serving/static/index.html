@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Company Evaluator</title>
+  <meta name="description" content="Forward price-movement risk scoring. Research tooling, not investment advice.">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    // Apply the saved theme before first paint so there is no flash.
+    try {
+      const t = localStorage.getItem("ace-theme");
+      if (t) document.documentElement.dataset.theme = t;
+      else if (matchMedia("(prefers-color-scheme: light)").matches) document.documentElement.dataset.theme = "light";
+    } catch (_) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232dd4bf'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%2304201c' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+        </div>
+        <div>
+          <div class="brand-name">Company Evaluator</div>
+          <div class="brand-sub">Price-move risk research</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Main">
+        <div class="nav-indicator" id="nav-indicator" aria-hidden="true"></div>
+        <a href="#/" data-route="evaluate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Evaluate</span>
+        </a>
+        <a href="#/models" data-route="models">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6" rx="1"/><rect x="12" y="8" width="3" height="10" rx="1"/><rect x="17" y="5" width="3" height="13" rx="1"/></svg>
+          <span>Models</span>
+        </a>
+        <a href="#/monitoring" data-route="monitoring">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 8-6-16-3 8H2"/></svg>
+          <span>Monitoring</span>
+        </a>
+      </nav>
+
+      <div class="rail-foot">
+        <div class="status-line" id="api-status"><span class="dot"></span><span>Connecting…</span></div>
+        <button class="btn btn-ghost" id="theme-toggle" type="button" aria-label="Toggle light and dark theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <span>Theme</span>
+        </button>
+        <p class="disclaimer">Research tooling, not investment advice. Scores are probabilities with measured, limited skill.</p>
+      </div>
+    </aside>
+
+    <main class="main" id="main">
+      <header class="topbar" id="topbar">
+        <div class="search" id="search">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <label for="search-input" class="sr-only">Search S&amp;P 500 companies</label>
+            <input id="search-input" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Search ticker or company…"
+                   role="combobox" aria-expanded="false" aria-controls="search-list" aria-autocomplete="list">
+            <span class="kbd" aria-hidden="true">/</span>
+          </div>
+          <div class="listbox" id="search-list" role="listbox" aria-label="Companies" hidden></div>
+        </div>
+      </header>
+
+      <div id="view" class="view" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
