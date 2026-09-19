@@ -126,3 +126,25 @@ def test_a_corrupt_latest_pointer_reads_as_no_scored_universe(scores_dir):
     assert scoring.latest_summary() is None
     board = scoring.leaderboard()
     assert board["available"] is False and board["rows"] == []
+
+
+def test_an_older_days_leaderboard_reports_that_days_date(scores_dir):
+    older = [{"ticker": "AAA", "sector": "Energy", "target": "magnitude_1d", "probability": 0.31}]
+    newer = [{"ticker": "BBB", "sector": "Energy", "target": "magnitude_1d", "probability": 0.62}]
+    _write_table(scores_dir, older, as_of="2026-09-17")
+    _write_table(scores_dir, newer, as_of="2026-09-18")  # also points latest.json here
+
+    board = scoring.leaderboard("magnitude_1d", as_of="2026-09-17")
+
+    assert board["as_of"] == "2026-09-17"
+    assert [r["ticker"] for r in board["rows"]] == ["AAA"]
+    assert board["computed_at"] is None and board["failures"] is None  # only known for the latest run
+
+
+def test_a_day_with_no_stored_scores_is_named_not_called_a_missing_run(scores_dir):
+    _write_table(scores_dir, [{"ticker": "AAA", "sector": "Energy", "target": "magnitude_1d", "probability": 0.3}])
+
+    board = scoring.leaderboard(as_of="2020-01-02")
+
+    assert board["available"] is False
+    assert "2020-01-02" in board["reason"] and "2026-09-18" in board["reason"]

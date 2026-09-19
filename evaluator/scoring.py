@@ -178,12 +178,23 @@ def leaderboard(
 ) -> dict:
     """Highest-probability names for one target, from the stored table."""
     summary = latest_summary()
-    scores = load_scores(as_of)
-    if scores is None or summary is None:
+    if summary is None:
         return {
             "available": False,
             "reason": "no scored universe yet. Run: python -m scripts.score_universe",
             "as_of": None,
+            "rows": [],
+        }
+
+    # Everything below describes the table actually served. Reporting the latest
+    # run's date beside an older day's rows would make a stale table look fresh.
+    as_of = as_of or summary["as_of"]
+    scores = load_scores(as_of)
+    if scores is None:
+        return {
+            "available": False,
+            "reason": f"no scores stored for {as_of}. Latest run: {summary['as_of']}",
+            "as_of": as_of,
             "rows": [],
         }
 
@@ -194,19 +205,21 @@ def leaderboard(
 
     from evaluator.model.deployability import assess
 
-    stale_by = _trading_days_since(summary["as_of"])
+    is_latest = as_of == summary["as_of"]
+    stale_by = _trading_days_since(as_of)
     return {
         "regime_guard": _target_guard(target),
         # Ranking 500 names by a model something simpler beats sorts noise.
         "deployability": assess(target),
         "available": True,
-        "as_of": summary["as_of"],
-        "computed_at": summary.get("computed_at"),
+        "as_of": as_of,
+        # Run-level facts exist only for the latest run's summary.
+        "computed_at": summary.get("computed_at") if is_latest else None,
         "target": target,
         "sector": sector,
-        "tickers_scored": summary.get("tickers"),
-        "failures": len(summary.get("failures", {})),
-        "targets": summary.get("targets", []),
+        "tickers_scored": int(scores["ticker"].nunique()),
+        "failures": len(summary.get("failures", {})) if is_latest else None,
+        "targets": sorted(scores["target"].unique().tolist()),
         "sectors": sorted(scores["sector"].dropna().unique().tolist()),
         "stale_trading_days": stale_by,
         "stale": stale_by > 1,
