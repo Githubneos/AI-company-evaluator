@@ -39,12 +39,14 @@ from evaluator.config import ARTIFACT_DIR, TargetSpec, ValidationConfig, default
 from evaluator.features.store import FeaturePanel, load_panel
 from evaluator.io import atomic_write_bytes, atomic_write_json
 from evaluator.metrics import calibration_bins, evaluate
+from evaluator.model.registry import CANDIDATE_DIR
 from evaluator.regimes import regime_for
 from evaluator.validation import PurgedWalkForward
 
 log = logging.getLogger(__name__)
 
-MODEL_DIR = Path(ARTIFACT_DIR) / "models"
+#: Training always writes candidates; only scripts.promote writes production.
+MODEL_DIR = CANDIDATE_DIR
 # MLflow 3 no longer writes to the old filesystem store by default.  SQLite is
 # still entirely local but supports the current tracking API and preserves runs
 # across retraining cycles.
@@ -116,6 +118,10 @@ class PanelTrainConfig:
     #: Whole dates are kept together so every cross-section stays intact and
     #: `split_panel`'s date-boundary guarantee still holds.
     max_train_rows: int = 800_000
+    #: Force a date stride instead of deriving one from `max_train_rows`. A
+    #: candidate must keep the incumbent's spacing, or the two models' rows
+    #: barely overlap and the gate has nothing to compare on.
+    date_stride: int | None = None
     num_boost_round: int = 1500
     early_stopping_rounds: int = 75
     learning_rate: float = 0.03
@@ -222,6 +228,7 @@ def _thin_by_date(
     dates: pd.Series,
     tickers: pd.Series,
     max_rows: int,
+    stride: int | None = None,
 ):
     """Keep every Nth date until the panel fits `max_rows`.
 
@@ -232,11 +239,13 @@ def _thin_by_date(
 
     Returns the thinned data plus the stride actually applied.
     """
-    if max_rows <= 0 or len(X) <= max_rows:
+    if stride is None and (max_rows <= 0 or len(X) <= max_rows):
         return X, y, dates, tickers, 1
 
     unique_dates = dates.unique()
-    stride = max(2, int(np.ceil(len(X) / max_rows)))
+    stride = stride if stride is not None else max(2, int(np.ceil(len(X) / max_rows)))
+    if stride <= 1:
+        return X, y, dates, tickers, 1
     keep_dates = set(unique_dates[::stride])
     mask = dates.isin(keep_dates).to_numpy()
 
@@ -270,6 +279,9 @@ class WalkForwardResult:
     dates: pd.Series
     #: One baseline class distribution per row, from that row's training fold.
     priors: np.ndarray
+    #: Ticker per row, when the caller supplied them: what lets a later
+    #: candidate be compared with this model on the rows they share.
+    tickers: np.ndarray | None = None
 
 
 def make_splitter(spec: TargetSpec, cfg: PanelTrainConfig, stride: int = 1) -> PurgedWalkForward:
@@ -297,6 +309,7 @@ def walk_forward(
     cfg: PanelTrainConfig,
     stride: int = 1,
     params_override: dict | None = None,
+    tickers: pd.Series | None = None,
 ) -> WalkForwardResult:
     """Purged, embargoed walk-forward evaluation of one target.
 
@@ -306,7 +319,7 @@ def walk_forward(
     splitter = make_splitter(spec, cfg, stride)
 
     folds, best_iterations = [], []
-    oos_true, oos_proba, oos_dates, oos_priors = [], [], [], []
+    oos_true, oos_proba, oos_dates, oos_priors, oos_tickers = [], [], [], [], []
 
     for i, (train_idx, test_idx) in enumerate(splitter.split_panel(dates)):
         booster = _fit_fold(X, y, dates, train_idx, spec, cfg, stride, params_override)
@@ -336,6 +349,8 @@ def walk_forward(
         oos_proba.append(proba)
         oos_dates.append(dates.iloc[test_idx])
         oos_priors.append(np.tile(priors, (len(y_test), 1)))
+        if tickers is not None:
+            oos_tickers.append(tickers.iloc[test_idx].to_numpy())
 
         log.info(
             "  %s fold %d (%s..%s) brier_skill=%+.4f",
@@ -350,6 +365,7 @@ def walk_forward(
         proba=np.vstack(oos_proba),
         dates=pd.concat(oos_dates),
         priors=np.vstack(oos_priors),
+        tickers=np.concatenate(oos_tickers) if oos_tickers else None,
     )
 
 
@@ -362,7 +378,9 @@ def train_target(
 ) -> dict:
     """Walk-forward evaluate then fit a final model for one target."""
     X, y, dates, tickers = panel.target_frame(spec)
-    X, y, dates, tickers, stride = _thin_by_date(X, y, dates, tickers, cfg.max_train_rows)
+    X, y, dates, tickers, stride = _thin_by_date(
+        X, y, dates, tickers, cfg.max_train_rows, stride=cfg.date_stride
+    )
     log.info(
         "%s: %s rows, %s tickers%s",
         spec.name,
@@ -371,7 +389,7 @@ def train_target(
         f" (kept every {stride} dates)" if stride > 1 else "",
     )
 
-    wf = walk_forward(X, y, dates, spec, cfg, stride)
+    wf = walk_forward(X, y, dates, spec, cfg, stride, tickers=tickers)
     folds, best_iterations = wf.folds, wf.best_iterations
     all_true, all_proba, all_dates = wf.y, wf.proba, wf.dates
     overall_priors = _priors(y.to_numpy(), spec.n_classes)
@@ -403,6 +421,9 @@ def train_target(
             y=all_true,
             probabilities=all_proba,
             dates=all_dates.to_numpy(dtype="datetime64[ns]"),
+            # Keyed rows are what the promotion gate compares a future
+            # candidate against, on the rows both models actually scored.
+            tickers=wf.tickers.astype("U12"),
         ),
         out_dir / "oos_predictions.npz",
     )

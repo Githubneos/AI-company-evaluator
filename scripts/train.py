@@ -30,6 +30,9 @@ def main() -> None:
     parser.add_argument("--embargo-days", type=int, default=10)
     parser.add_argument("--max-train-rows", type=int, default=800_000,
                         help="cap rows by keeping every Nth date; lower it if memory is tight")
+    parser.add_argument("--date-stride", type=int, default=None,
+                        help="force the date stride (use the incumbent's, so the promotion gate "
+                             "can compare the two models on shared rows)")
     parser.add_argument("--tune", type=int, default=0, metavar="N",
                         help="Optuna trials before training (spec 3.2); 0 disables")
     parser.add_argument("--challenger", action="store_true",
@@ -53,6 +56,7 @@ def main() -> None:
             embargo_days=args.embargo_days,
         ),
         max_train_rows=args.max_train_rows,
+        date_stride=args.date_stride,
     )
 
     # Load only the label columns these targets need: on 8 GB the unused label

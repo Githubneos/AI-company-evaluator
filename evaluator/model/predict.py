@@ -16,7 +16,6 @@ import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
@@ -27,7 +26,7 @@ from evaluator.dataset import build_dataset
 from evaluator.features.build import FEATURE_DESCRIPTIONS
 from evaluator.features.store import align_to_schema
 from evaluator.labels import label_scale
-from evaluator.model.train import MODEL_DIR
+from evaluator.model import registry
 
 log = logging.getLogger(__name__)
 
@@ -52,11 +51,14 @@ class LoadedModel:
 
 @lru_cache(maxsize=12)
 def load_model(target_name: str) -> LoadedModel:
-    out_dir = Path(MODEL_DIR) / target_name
+    # Production only: training overwrites candidates, so serving from there
+    # would put every retrain straight into traffic, gate or no gate.
+    out_dir = registry.model_dir(target_name, registry.PRODUCTION)
     model_path, meta_path = out_dir / "model.txt", out_dir / "metadata.json"
     if not model_path.exists() or not meta_path.exists():
         raise ModelNotTrained(
-            f"no trained model for {target_name!r} in {out_dir}. Run: python -m scripts.train"
+            f"no promoted model for {target_name!r} in {out_dir}. Train it, then run: "
+            "python -m scripts.promote --all --apply"
         )
     return LoadedModel(
         booster=lgb.Booster(model_file=str(model_path)),
@@ -65,9 +67,7 @@ def load_model(target_name: str) -> LoadedModel:
 
 
 def available_targets() -> list[str]:
-    if not Path(MODEL_DIR).exists():
-        return []
-    return sorted(p.name for p in Path(MODEL_DIR).iterdir() if (p / "model.txt").exists())
+    return registry.available_targets(registry.PRODUCTION)
 
 
 def _as_proba(raw, n_classes: int) -> np.ndarray:

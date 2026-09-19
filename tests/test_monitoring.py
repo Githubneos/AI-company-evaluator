@@ -15,13 +15,13 @@ are usually the volatile ones where being right matters most.
 import numpy as np
 import pandas as pd
 
+from evaluator.model.promotion import compare
 from evaluator.monitoring import (
     PSI_RETRAIN_THRESHOLD,
     feature_drift,
     population_stability_index,
     should_retrain,
 )
-from scripts.promote import compare
 
 
 class TestPSI:

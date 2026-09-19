@@ -89,15 +89,12 @@ def test_validation_endpoint_carries_baselines_when_computed(monkeypatch):
     monkeypatch.setattr(serving, "load_model", lambda target: FakeModel())
     client = TestClient(serving.app)
 
-    monkeypatch.setattr(serving, "load_baselines", lambda target: None)
-    monkeypatch.setattr(serving, "load_ablations", lambda target: None)
-    monkeypatch.setattr(serving, "load_vol_benchmarks", lambda target: None)
+    monkeypatch.setattr(serving, "load_report", lambda target, kind: None)
     body = client.get("/model/magnitude_1d/validation").json()
     assert body["baselines"] is None and body["ablations"] is None and body["vol_benchmarks"] is None
 
-    monkeypatch.setattr(serving, "load_baselines", lambda target: {"verdict": "v"})
-    monkeypatch.setattr(serving, "load_ablations", lambda target: {"sets": {}})
-    monkeypatch.setattr(serving, "load_vol_benchmarks", lambda target: {"benchmarks": {}})
+    reports = {"baselines": {"verdict": "v"}, "ablations": {"sets": {}}, "vol_benchmarks": {"benchmarks": {}}}
+    monkeypatch.setattr(serving, "load_report", lambda target, kind: reports[kind])
     body = client.get("/model/magnitude_1d/validation").json()
     assert body["baselines"] == {"verdict": "v"} and body["ablations"] == {"sets": {}}
     assert body["vol_benchmarks"] == {"benchmarks": {}}

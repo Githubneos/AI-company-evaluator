@@ -301,9 +301,31 @@ to `main`, installing from `requirements.lock` with CPU-only torch.
 ```bash
 python -m scripts.backfill        # prices + EDGAR events  (~90 min)
 python -m scripts.build_panel     # feature panel          (~45 min)
-python -m scripts.train --n-splits 17 --max-train-rows 320000   # 6 models
+python -m scripts.train --n-splits 17 --max-train-rows 320000   # 6 candidates
+python -m scripts.promote --apply # gate, then copy to production
 python -m scripts.build_analogs   # historical analog index
 uvicorn evaluator.serving.app:app --reload
+```
+
+### Candidates and production
+
+Training writes **candidates** to `artifacts/models/<target>`, overwriting the
+previous run. Serving only ever reads **production**, `artifacts/production/<target>`,
+which nothing but `scripts.promote` writes. Without that split the gate decides
+nothing, because every retrain would already be live by the time it ran.
+
+`scripts.promote` refuses a candidate that has no skill over its own base rate,
+that does not beat the incumbent **on the rows both models scored out of fold**
+(keyed by ticker and date, with a date-block bootstrap interval), or that
+regresses in any single regime. Pooled skill alone is not enough: two training
+runs on different universes or histories face different rows, and the easier
+population wins a pooled comparison for the wrong reason. Promotion copies the
+whole model directory, so the analysis reports travel with the model, and swaps
+it into place so a reader never sees a half-written directory.
+
+```bash
+python -m scripts.promote                 # dry run: verdict and reasons
+python -m scripts.backfill_oos_tickers --apply   # one-off, for models trained before keys were recorded
 ```
 
 ## API
