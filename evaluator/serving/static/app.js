@@ -1304,6 +1304,72 @@
       </section>`;
   }
 
+  /** Where the volatility signal lives: one panel feature at a time, same folds. */
+  function diagRows(vb) {
+    const diag = Object.entries(vb.single_feature_diagnostics || {});
+    if (!diag.length) return "";
+    diag.sort((a, b) => b[1] - a[1]);
+    const max = Math.max(...diag.map(([, v]) => Math.abs(v)), 1e-9);
+    return `
+      <div style="margin-top:18px">
+        <div class="eyebrow" style="margin-bottom:8px">Single-feature diagnostic \u00b7 Brier skill, same folds and calibration</div>
+        <div class="drivers grown">${diag.map(([label, v], i) => `
+          <div class="driver" style="--i:${i};grid-template-columns:minmax(0,260px) 1fr 72px">
+            <span class="small">${esc(label)}</span>
+            <div class="driver-bar plain" style="height:12px"><span class="fill up" style="left:0;top:2px;bottom:2px;width:${((Math.abs(v) / max) * 100).toFixed(1)}%;background:${v >= 0 ? "var(--accent-2)" : "var(--neg)"}"></span></div>
+            <span class="mono small ${toneOf(v, 0.0005)}" style="text-align:right">${signed(v, 4)}</span>
+          </div>`).join("")}</div>
+      </div>`;
+  }
+
+  function volBenchCard(r) {
+    const vb = r.vol_benchmarks;
+    if (!vb) {
+      return `<section class="card span-12"><div class="card-head"><div><h2 class="card-title">${ICON.gauge} Versus standard volatility models</h2>
+        <p class="card-sub">Not computed yet. Run <code class="mono">python -m scripts.evaluate_vol_benchmarks --targets ${esc(r.target)}</code>.</p></div></div></section>`;
+    }
+    const benches = Object.entries(vb.benchmarks);
+    const edges = benches.flatMap(([, b]) => [b.model_edge.ci90[0], b.model_edge.ci90[1], b.model_edge.pooled]).filter(isNum);
+    const m = Math.max(0.004, ...edges.map(Math.abs)) * 1.1;
+    const pct = (v) => ((v + m) / (2 * m)) * 100;
+    const skillTiles = [["This model", vb.model.pooled.brier_skill], ...benches.map(([, b]) => [b.label, b.pooled.brier_skill])];
+    const rows = benches.map(([, b], i) => {
+      const e = b.model_edge;
+      const v = e.pooled;
+      const [lo, hi] = e.ci90;
+      const [chip, word] = lo > 0 ? ["chip-pos", "beats it"] : hi < 0 ? ["chip-neg", "loses to it"] : ["", "indistinguishable"];
+      return `
+        <div class="abl-row" style="--i:${i}">
+          <div class="abl-name">Edge over ${esc(b.label)}<small>paired, same rows</small></div>
+          <div class="abl-track" style="--zero:${pct(0).toFixed(2)}%" title="${signed(v, 4)} Brier (90% CI ${signed(lo, 4)} to ${signed(hi, 4)}), better in ${e.fold_wins}/${e.n_folds} folds">
+            <span class="abl-bar ${v >= 0 ? "up" : "down"}" style="left:${(v >= 0 ? pct(0) : pct(v)).toFixed(2)}%;width:${Math.abs(pct(v) - pct(0)).toFixed(2)}%;transition-delay:${i * 80}ms"></span>
+            <span class="abl-whisker" style="left:${pct(lo).toFixed(2)}%;width:${Math.max(0.4, pct(hi) - pct(lo)).toFixed(2)}%"></span>
+          </div>
+          <div class="abl-stat">
+            <span class="mono small ${toneOf(v, 0.0005)}">${signed(v, 4)} <span class="muted xs">${e.fold_wins}/${e.n_folds}</span></span>
+            <span class="chip ${chip}" style="height:20px">${word}</span>
+          </div>
+        </div>`;
+    }).join("");
+    const regimes = REGIMES.filter(([k]) => benches.some(([, b]) => isNum(b.model_edge_by_regime[k])));
+    const cell = (x) => {
+      if (!isNum(x)) return '<td class="cell muted">\u2014</td>';
+      const a = Math.min(1, Math.abs(x) / 0.04);
+      return `<td class="cell" style="background:color-mix(in srgb, ${x >= 0 ? "var(--pos)" : "var(--neg)"} ${(8 + a * 42).toFixed(0)}%, transparent)">${signed(x, 4)}</td>`;
+    };
+    return `
+      <section class="card span-12">
+        <div class="card-head"><div><h2 class="card-title">${ICON.gauge} Versus standard volatility models</h2>
+          <p class="card-sub">HAR-RV and GARCH(1,1) forecast h-day variance, calibrated to probabilities on each fold\u2019s training rows and scored on this model\u2019s out-of-sample rows (${(vb.n_rows || 0).toLocaleString()}, ${Math.round((vb.coverage || 0) * 1000) / 10}% with price history).</p></div></div>
+        <div class="stats ${skillTiles.length === 4 ? "stats-4" : "stats-3"}" style="margin-bottom:14px">${skillTiles.map(([label, x]) => `
+          <div class="stat"><span class="eyebrow">${esc(label)}</span>${num(x, "s4", toneOf(x))}<span class="xs muted">Brier skill vs base rate</span></div>`).join("")}</div>
+        <div class="abl">${rows}</div>
+        ${diagRows(vb)}
+        ${regimes.length ? `<div class="table-wrap" style="margin-top:14px"><table class="heat"><thead><tr><th>Model edge by regime</th>${regimes.map(([, n]) => `<th class="c">${esc(n)}</th>`).join("")}</tr></thead>
+          <tbody>${benches.map(([, b], i) => `<tr style="--i:${i}"><td class="name">over ${esc(b.label)}</td>${regimes.map(([k]) => cell(b.model_edge_by_regime[k])).join("")}</tr>`).join("")}</tbody></table></div>` : ""}
+      </section>`;
+  }
+
   function heatmapCard(present, v) {
     const cols = REGIMES.filter(([k]) => present.some((t) => v[t].validation.by_regime && v[t].validation.by_regime[k]));
     const cell = (x) => {
@@ -1353,6 +1419,7 @@
       </section>
       ${baselineCard(r)}
       ${ablationCard(r)}
+      ${volBenchCard(r)}
       <section class="card span-12">
         <div class="stats stats-3">
           <div class="stat"><span class="eyebrow">Train window</span><span class="num" style="font-size:16px">${esc(r.train_start)} → ${esc(r.train_end)}</span></div>

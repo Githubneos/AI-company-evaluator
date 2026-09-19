@@ -9,6 +9,7 @@ dependencies = [
     "lightgbm>=4.5",
     "shap>=0.46",
     "scikit-learn>=1.5",
+    "scipy>=1.11",
     "yfinance>=0.2.50",
     "anthropic>=1.0",
     "fastapi>=0.115",

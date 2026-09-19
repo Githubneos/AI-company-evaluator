@@ -272,6 +272,23 @@ class WalkForwardResult:
     priors: np.ndarray
 
 
+def make_splitter(spec: TargetSpec, cfg: PanelTrainConfig, stride: int = 1) -> PurgedWalkForward:
+    """The walk-forward splitter for one target -- the single definition of its folds.
+
+    `split_panel` counts *retained* dates, so every window expressed in trading
+    days has to be rescaled by the stride. Skipping this would silently turn a
+    one-year test fold into a `stride`-year one and shrink the purge gap below
+    the label horizon -- reintroducing exactly the overlap the purge exists to
+    remove, while the fold boundaries still looked correct.
+    """
+    return PurgedWalkForward(
+        n_splits=cfg.validation.n_splits,
+        test_size=max(1, round(cfg.validation.test_days / stride)),
+        purge=max(1, math.ceil(spec.horizon_days / stride)),
+        embargo=max(1, math.ceil(cfg.validation.embargo_days / stride)),
+    )
+
+
 def walk_forward(
     X: pd.DataFrame,
     y: pd.Series,
@@ -286,17 +303,7 @@ def walk_forward(
     Shared by training and by the baseline ablations, so a baseline is scored
     on exactly the folds, rows and early-stopping scheme the real model was.
     """
-    # `split_panel` counts *retained* dates, so every window expressed in trading
-    # days has to be rescaled by the stride. Skipping this would silently turn a
-    # one-year test fold into a `stride`-year one and shrink the purge gap below
-    # the label horizon -- reintroducing exactly the overlap the purge exists to
-    # remove, while the fold boundaries still looked correct.
-    splitter = PurgedWalkForward(
-        n_splits=cfg.validation.n_splits,
-        test_size=max(1, round(cfg.validation.test_days / stride)),
-        purge=max(1, math.ceil(spec.horizon_days / stride)),
-        embargo=max(1, math.ceil(cfg.validation.embargo_days / stride)),
-    )
+    splitter = make_splitter(spec, cfg, stride)
 
     folds, best_iterations = [], []
     oos_true, oos_proba, oos_dates, oos_priors = [], [], [], []

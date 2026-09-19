@@ -26,6 +26,7 @@ from evaluator.llm.provider import LLMUnavailable
 from evaluator.model.ablations import load_ablations
 from evaluator.model.baselines import load_baselines
 from evaluator.model.predict import ModelNotTrained, available_targets, load_model, score_ticker
+from evaluator.model.vol_benchmarks import load_vol_benchmarks
 from evaluator.monitoring import system_report
 
 log = logging.getLogger(__name__)
@@ -248,6 +249,9 @@ def validation(target: str) -> dict:
         # Edge of each feature group over volatility alone; null until
         # scripts.evaluate_ablations has run.
         "ablations": load_ablations(target),
+        # Model vs HAR-RV and GARCH(1,1) on the same rows; null until
+        # scripts.evaluate_vol_benchmarks has run.
+        "vol_benchmarks": load_vol_benchmarks(target),
         "caveats": metadata["data_caveats"],
     }
 
