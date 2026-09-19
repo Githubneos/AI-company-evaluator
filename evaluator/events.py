@@ -13,7 +13,8 @@ left deliberately unpopulated rather than approximated:
   GUIDANCE_RAISE / GUIDANCE_CUT   Usually inside an Item 2.02 or 8.01 narrative.
   LITIGATION_FILED / _RESOLVED    Almost always Item 8.01, undifferentiated.
   DEBT_DOWNGRADE / _UPGRADE       Rating actions come from agencies, not filings.
-  DIVIDEND_CHANGE                 Typically Item 8.01 or a press release.
+  DIVIDEND_CHANGE                 Populated from the payment series instead;
+                                  see evaluator.data.dividends.
 
 Guessing at these from item codes would produce labels that look complete and
 are wrong, which is worse than a gap the model can see. Populating them properly
@@ -116,7 +117,6 @@ UNPOPULATED_TYPES = [
     "LITIGATION_RESOLVED",
     "DEBT_DOWNGRADE",
     "DEBT_UPGRADE",
-    "DIVIDEND_CHANGE",
 ]
 
 

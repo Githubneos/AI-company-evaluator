@@ -69,9 +69,33 @@ def backfill_events(limit: int | None) -> pd.DataFrame:
     return events
 
 
+def backfill_dividends(limit: int | None) -> pd.DataFrame:
+    """Per-ticker dividend history, cached; the source of DIVIDEND_* events."""
+    from evaluator.data.dividends import dividend_events, load_dividends
+
+    tickers = load_universe()["ticker"].tolist()[: limit or None]
+    frames, payers = [], 0
+    for i, ticker in enumerate(tickers, start=1):
+        try:
+            series = load_dividends(ticker)
+        except Exception as exc:  # noqa: BLE001 - one bad name must not stop the run
+            log.warning("dividends failed for %s: %s", ticker, exc)
+            continue
+        if series.empty:
+            continue
+        payers += 1
+        frames.append(dividend_events(ticker, series))
+        if i % 50 == 0:
+            log.info("dividends %d/%d (%d payers)", i, len(tickers), payers)
+
+    events = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    log.info("dividends: %d payers of %d tickers, %s events", payers, len(tickers), f"{len(events):,}")
+    return events
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--what", choices=["prices", "events", "all"], default="all")
+    parser.add_argument("--what", choices=["prices", "events", "dividends", "all"], default="all")
     parser.add_argument("--start", default="2005-01-01")
     parser.add_argument("--end", default=None)
     parser.add_argument("--limit", type=int, default=None, help="first N tickers only")
@@ -82,6 +106,12 @@ def main() -> None:
     if args.what in ("prices", "all"):
         panel = backfill_prices(args.start, args.end, args.limit)
         print(f"prices: {len(panel):,} rows, {panel.ticker.nunique()} tickers")
+
+    if args.what in ("dividends", "all"):
+        payouts = backfill_dividends(args.limit)
+        if not payouts.empty:
+            print(f"\ndividend events: {len(payouts):,} rows, {payouts.ticker.nunique()} payers")
+            print(payouts.event_type.value_counts().to_string())
 
     if args.what in ("events", "all"):
         events = backfill_events(args.limit)

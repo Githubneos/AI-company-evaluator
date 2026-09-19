@@ -56,6 +56,8 @@ def realized_vol(returns: pd.Series, window: int) -> pd.Series:
 #: search without carrying signal.
 TRACKED_EVENT_TYPES = (
     "EARNINGS_RESULT",
+    "DIVIDEND_CUT",
+    "DIVIDEND_RAISE",
     "EXECUTIVE_CHANGE",
     "MA_ANNOUNCED",
     "REGULATORY_ACTION",
@@ -99,6 +101,7 @@ def build_event_features(index: pd.DatetimeIndex, events: pd.DataFrame) -> pd.Da
     if events is None or events.empty:
         for event_type in TRACKED_EVENT_TYPES:
             out[f"days_since_{event_type.lower()}"] = NO_EVENT_SENTINEL
+        out["dividend_cuts_365d"] = 0.0
         out["event_density_90d"] = 0.0
         out["days_since_any_event"] = NO_EVENT_SENTINEL
         return out
@@ -125,6 +128,16 @@ def build_event_features(index: pd.DatetimeIndex, events: pd.DataFrame) -> pd.Da
             events[events["event_type"] == event_type]
         )
     out["days_since_any_event"] = days_since(events)
+
+    # A dividend cut is rare and rarely isolated: count them over a year rather
+    # than only timing the last one.
+    cuts = events[events["event_type"] == "DIVIDEND_CUT"]
+    if cuts.empty:
+        out["dividend_cuts_365d"] = 0.0
+    else:
+        per_day = cuts.groupby("event_date").size()
+        daily = per_day.reindex(index.union(per_day.index)).fillna(0.0).sort_index()
+        out["dividend_cuts_365d"] = daily.rolling("365D").sum().reindex(index).fillna(0.0)
 
     # Event density: a proxy for company instability (spec 2.3). Counted on a
     # calendar window so it does not distort across holidays.
@@ -250,6 +263,7 @@ FEATURE_DESCRIPTIONS = {
     "vol_vs_sector": "stock volatility divided by sector volatility",
     "event_density_90d": "material SEC filings in the trailing 90 days",
     "days_since_any_event": "days since the last material filing",
+    "dividend_cuts_365d": "dividend cuts in the trailing year",
     "recession": "NBER recession indicator",
     **{
         f"days_since_{t.lower()}": f"days since the last {t.replace('_', ' ').lower()} filing"

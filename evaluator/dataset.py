@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from evaluator.config import LabelConfig, TargetSpec, default_targets
+from evaluator.data.dividends import dividend_events, load_dividends
 from evaluator.data.edgar import EdgarClient
 from evaluator.data.fundamentals import join_as_of, load_fundamentals
 from evaluator.data.sources import load_benchmark, load_macro, load_prices
@@ -62,8 +63,10 @@ def build_dataset(
     with_events: bool = True,
     with_fundamentals: bool = True,
     with_sector: bool = True,
+    with_dividends: bool = True,
     targets: list[TargetSpec] | None = None,
     events: pd.DataFrame | None = None,
+    dividends: pd.Series | None = None,
 ) -> Dataset:
     """Assemble one ticker.
 
@@ -94,6 +97,20 @@ def build_dataset(
                 events = build_event_table(filings)
             except Exception as exc:  # noqa: BLE001 - events are optional
                 log.warning("events unavailable for %s: %s", ticker, exc)
+
+    # Dividend decisions cannot be read off 8-K item codes; they come from the
+    # payment series instead, and join the same event table (spec 1.3).
+    if with_events and with_dividends:
+        try:
+            if dividends is None:
+                paid = load_dividends(ticker, use_cache=use_cache)
+            else:
+                paid = dividends
+            payouts = dividend_events(ticker, paid)
+            if not payouts.empty:
+                events = payouts if events is None else pd.concat([events, payouts], ignore_index=True)
+        except Exception as exc:  # noqa: BLE001 - dividends are optional
+            log.warning("dividends unavailable for %s: %s", ticker, exc)
 
     features = build_features(
         prices,

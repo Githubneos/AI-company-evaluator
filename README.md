@@ -23,8 +23,8 @@ All eight phases of the spec, at a scale that runs on a laptop.
 
 | Phase | Status |
 |---|---|
-| 1 Data + event taxonomy | 503 S&P names, 2.56M price rows, 237k events from 8-K item codes (1993–2026) |
-| 2 Features | 44 features: technical, sector-relative, event-derived, fundamentals, macro/regime |
+| 1 Data + event taxonomy | 503 S&P names, 2.56M price rows, 237k events from 8-K item codes (1993–2026), plus 12.3k dividend events from the payment series |
+| 2 Features | 47 features: technical, sector-relative, event-derived (8-K and dividends), fundamentals, macro/regime |
 | 3 Models | 6 LightGBM models (direction + magnitude × 1/5/20d), purged walk-forward, per-regime validation, Optuna, XGBoost challenger, TreeSHAP, analog retrieval |
 | 4 Sentiment | FinBERT over yfinance + EDGAR 8-K feeds, credibility/recency weighting, staleness flags, divergence detection |
 | 5 Fusion | Rules-based payload assembly; optional learned meta-model |
@@ -247,15 +247,44 @@ reasons to be treated as research-only: a four-feature volatility model beats
 python -m scripts.evaluate_vol_benchmarks --targets magnitude_1d   # ~3 min, ~1.1 GB
 ```
 
+### Dividend events, from the payment series
+
+8-K item codes cannot express a dividend decision, so `DIVIDEND_CHANGE` sat in
+the unpopulated list. The payment series can, and it is free:
+`evaluator/data/dividends.py` derives initiations, raises, cuts, suspensions
+and resumptions from yfinance's dividend history and joins them to the same
+event table.
+
+Two dating rules keep this causal:
+
+- Events sit on the **ex-dividend date**. The announcement comes earlier, often
+  by weeks, so a feature saying "a cut happened N days ago" refers to
+  information the market already had.
+- A **suspension has no payment to sit on**, so it is dated when a payment the
+  company's own rhythm predicted failed to appear (1.5 median intervals after
+  the last one), never at the last payment or at the eventual resumption.
+
+Across the universe: **422 of 503 names pay dividends, giving 12,304 events**
+(10,253 raises, 1,006 cuts, 725 initiations/resumptions, 320 suspensions),
+7,545 of them inside the panel's 2005– span, and none dated in the future.
+Cuts peak in 2020, matching the COVID wave.
+
+Spot-checked against real history: Apple pays from 1987, stops (suspension
+detected April 1996), resumes August 2012; Agilent initiates in 2012; AbbVie
+initiates at its 2013 spin-off.
+
+New features: `days_since_dividend_cut`, `days_since_dividend_raise` and
+`dividend_cuts_365d`. They reach the models at the next panel rebuild.
+
 ## Known defects
 
 - **Survivorship bias.** The universe is today's S&P 500. Firms that failed or
   were removed are absent, so downside frequencies are a floor, not an estimate.
   Not fixable in modelling — it needs CRSP delisting data (spec 1.2).
-- **Four event categories are unpopulated.** Guidance, litigation, dividend, and
-  rating events cannot be derived from 8-K item codes. They are left empty and
-  flagged rather than approximated, because labels that look complete and are
-  wrong are worse than a visible gap.
+- **Three event categories are unpopulated.** Guidance, litigation and rating
+  events cannot be derived from 8-K item codes. They are left empty and flagged
+  rather than approximated, because labels that look complete and are wrong are
+  worse than a visible gap. (Dividends are populated now: see below.)
 - **News relevance is weak.** yfinance returns loosely-related market news, not
   strictly company-specific coverage. A paid feed (Benzinga, Bloomberg) would
   fix this.
