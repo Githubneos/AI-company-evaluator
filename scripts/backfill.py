@@ -93,9 +93,25 @@ def backfill_dividends(limit: int | None) -> pd.DataFrame:
     return events
 
 
+def backfill_delisted(start: str, limit: int | None) -> pd.DataFrame:
+    """Try to recover names that left the index, and record what can be trusted."""
+    from evaluator.data.delisted import COVERAGE_PATH, survey
+
+    coverage = survey(start, limit=limit)
+    if coverage.empty:
+        log.warning("no removed names in range; fetch the change history first")
+        return coverage
+    COVERAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    coverage.to_csv(COVERAGE_PATH, index=False)
+    log.info("delisted coverage written to %s", COVERAGE_PATH)
+    return coverage
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--what", choices=["prices", "events", "dividends", "all"], default="all")
+    parser.add_argument(
+        "--what", choices=["prices", "events", "dividends", "delisted", "all"], default="all"
+    )
     parser.add_argument("--start", default="2005-01-01")
     parser.add_argument("--end", default=None)
     parser.add_argument("--limit", type=int, default=None, help="first N tickers only")
@@ -106,6 +122,13 @@ def main() -> None:
     if args.what in ("prices", "all"):
         panel = backfill_prices(args.start, args.end, args.limit)
         print(f"prices: {len(panel):,} rows, {panel.ticker.nunique()} tickers")
+
+    if args.what in ("delisted", "all"):
+        coverage = backfill_delisted(args.start, args.limit)
+        if not coverage.empty:
+            usable = (coverage["status"] == "ok").sum()
+            print(f"\ndelisted names surveyed: {len(coverage):,}, usable: {usable:,}")
+            print(coverage["status"].value_counts().to_string())
 
     if args.what in ("dividends", "all"):
         payouts = backfill_dividends(args.limit)

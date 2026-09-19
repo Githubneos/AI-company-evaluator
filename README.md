@@ -247,6 +247,49 @@ reasons to be treated as research-only: a four-feature volatility model beats
 python -m scripts.evaluate_vol_benchmarks --targets magnitude_1d   # ~3 min, ~1.1 GB
 ```
 
+### Survivorship: historical membership, and what free data cannot fix
+
+The universe was "today's S&P 500, backfilled", which quietly assumes today's
+members were always members and that nothing ever left.
+`data/universe/sp500_changes.csv` (407 index changes back to 1976, fetched from
+Wikipedia and checked in) fixes the first half: `membership_intervals()`
+reconstructs when each of 858 names was actually in the index by walking the
+change history backwards from today's constituents, and the panel keeps only
+rows inside those intervals.
+
+Spot-checked against history: Lehman Brothers leaves 2008-09-16, Twitter
+2018–2022, Dell leaves in 2013 when taken private and returns in 2024. 28 names
+have more than one spell.
+
+The second half is where free data runs out. Of 343 removed names inside the
+panel's span:
+
+| outcome | names | |
+|---|---|---|
+| recovered and used | 97 | all still-listed names the index merely dropped |
+| no data at all | 200 | 129 of them genuine delistings |
+| **rejected: ticker reused** | 35 | all genuine delistings |
+| too little history in-window | 11 | |
+
+**Not one genuinely delisted company was recoverable.** yfinance returns
+nothing for Lehman, Twitter or Activision. Worse, for 35 dead symbols it
+returns a *different* company that trades under them today: asking for AV
+(Avaya, acquired 2007), WB (Wachovia, 2008) or SGP (Schering-Plough, 2009)
+yields continuous data through 2026. Accepting it would have put the wrong
+company's prices into the panel labelled as a failed one — a bias that looks
+like better data. `evaluator/data/delisted.py` rejects any name whose removal
+reason implies it stopped trading but whose series runs more than 25 days past
+the removal date.
+
+So the panel grows from 503 to 600 names and loses its "always a member"
+assumption, but the companies that actually failed are still missing, and that
+is the part that matters most for downside risk.
+
+```bash
+python -m scripts.fetch_universe_changes --apply   # the change history
+python -m scripts.backfill --what delisted         # what can be recovered
+```
+
 ### Dividend events, from the payment series
 
 8-K item codes cannot express a dividend decision, so `DIVIDEND_CHANGE` sat in
@@ -278,9 +321,10 @@ New features: `days_since_dividend_cut`, `days_since_dividend_raise` and
 
 ## Known defects
 
-- **Survivorship bias.** The universe is today's S&P 500. Firms that failed or
-  were removed are absent, so downside frequencies are a floor, not an estimate.
-  Not fixable in modelling — it needs CRSP delisting data (spec 1.2).
+- **Survivorship bias: reduced, not fixed.** The panel now uses historical index
+  membership and adds back 97 removed names, but **no genuinely delisted company
+  could be recovered** from free data. Downside frequencies remain a floor. See
+  below; a real fix still needs CRSP delisting data (spec 1.2).
 - **Three event categories are unpopulated.** Guidance, litigation and rating
   events cannot be derived from 8-K item codes. They are left empty and flagged
   rather than approximated, because labels that look complete and are wrong are

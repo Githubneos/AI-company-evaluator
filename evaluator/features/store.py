@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from evaluator.config import ARTIFACT_DIR, TargetSpec, default_targets
-from evaluator.data.universe import load_universe
+from evaluator.data.universe import load_universe, was_member
 from evaluator.dataset import build_dataset
 from evaluator.io import atomic_write_json, atomic_write_parquet
 
@@ -36,6 +36,16 @@ PANEL_PATH = STORE_DIR / "panel.parquet"
 META_PATH = STORE_DIR / "meta.json"
 
 ID_COLUMNS = ["ticker", "date"]
+
+
+def recovered_tickers() -> list[str]:
+    """Removed names whose price history was recovered and judged trustworthy."""
+    from evaluator.data.delisted import COVERAGE_PATH, OK
+
+    if not COVERAGE_PATH.exists():
+        return []
+    coverage = pd.read_csv(COVERAGE_PATH)
+    return sorted(coverage.loc[coverage["status"] == OK, "ticker"].astype(str))
 
 
 def schema_hash(feature_names: list[str]) -> str:
@@ -83,11 +93,22 @@ def build_panel(
     targets: list[TargetSpec] | None = None,
     *,
     limit: int | None = None,
+    include_removed: bool = True,
 ) -> FeaturePanel:
-    """Build and persist the full cross-sectional panel."""
+    """Build and persist the full cross-sectional panel.
+
+    The universe is every name that was in the index during `start`..`end`, not
+    just today's constituents: names that left and whose prices could be
+    recovered are included for the window they were members (see
+    `scripts.backfill --what delisted`).
+    """
     targets = targets or default_targets()
     if tickers is None:
         tickers = load_universe()["ticker"].tolist()
+        if include_removed:
+            recovered = recovered_tickers()
+            log.info("universe: %d current + %d recovered removed names", len(tickers), len(recovered))
+            tickers = tickers + [t for t in recovered if t not in set(tickers)]
     if limit:
         tickers = tickers[:limit]
 
@@ -114,15 +135,11 @@ def build_panel(
         block = pd.concat([block, dataset.labels], axis=1)
         block.insert(0, "ticker", ticker)
         block = block.reset_index().rename(columns={"index": "date"})
-        # Do not train on a company's history before it was in the historical
-        # S&P constituent universe.  The checked-in universe is still
-        # survivorship-biased (only CRSP can fix that), but this removes the
-        # separate, avoidable look-ahead from treating today's constituents as
-        # members in years before their actual inclusion.
-        universe = load_universe()
-        date_added = universe.loc[universe["ticker"] == ticker, "date_added"]
-        if not date_added.empty and pd.notna(date_added.iloc[0]):
-            block = block[block["date"] >= date_added.iloc[0]]
+        # Only the rows where this company was actually in the index. Training
+        # on its history before inclusion is a look-ahead; training on it after
+        # removal is a different company's universe. Both are avoidable, unlike
+        # the deeper survivorship problem (see evaluator/data/delisted.py).
+        block = block[was_member(ticker, block["date"]).to_numpy()]
         if block.empty:
             failures += 1
             continue
