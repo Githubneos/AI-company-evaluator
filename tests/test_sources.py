@@ -35,6 +35,29 @@ def test_live_cache_fetches_only_the_missing_tail(tmp_path, monkeypatch):
     assert result.index.max() == pd.Timestamp("2024-01-04")
 
 
+def test_unreadable_price_cache_is_refetched_and_rewritten_atomically(tmp_path, monkeypatch):
+    monkeypatch.setattr(sources, "CACHE_DIR", tmp_path)
+    path = sources._cache_path("TEST", "2024-01-01", None)
+    # What two interleaved in-place writers left behind in production.
+    path.write_bytes(b"PAR1 half-written garbage")
+    calls = []
+
+    class FakeYF:
+        @staticmethod
+        def download(ticker, **kwargs):
+            calls.append(kwargs["start"])
+            return _bars(kwargs["start"])
+
+    monkeypatch.setitem(__import__("sys").modules, "yfinance", FakeYF)
+
+    result = sources.load_prices("TEST", "2024-01-01")
+
+    assert calls == ["2024-01-01"]  # full refetch, not a crash
+    assert len(result) == 2
+    pd.testing.assert_frame_equal(pd.read_parquet(path), result, check_freq=False)
+    assert [p.name for p in tmp_path.iterdir()] == [path.name]  # no temp files left
+
+
 def test_edgar_refresh_bypasses_an_existing_cache(tmp_path, monkeypatch):
     client = EdgarClient(cache_dir=tmp_path)
     cached = pd.DataFrame(columns=["cik", "ticker", "form", "filing_date", "acceptance_datetime", "report_date", "items", "accession"])

@@ -16,6 +16,8 @@ Polygon loader can replace it without touching features, labels, or models.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 
 import pandas as pd
 
@@ -55,7 +57,7 @@ def load_prices(
     Returns columns: open, high, low, close, volume.
     """
     path = _cache_path(ticker, start, end)
-    cached = pd.read_parquet(path) if use_cache and path.exists() else None
+    cached = _read_cache(path) if use_cache else None
     # Historical requests are immutable.  A request with no end date is a live
     # series, however: returning its first cached copy forever would silently
     # freeze serving features and every scheduled panel refresh.  Refresh only
@@ -102,9 +104,39 @@ def load_prices(
         df = pd.concat([cached, df]).loc[lambda frame: ~frame.index.duplicated(keep="last")].sort_index()
 
     if use_cache:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(path)
+        _write_cache(df, path)
     return df
+
+
+def _read_cache(path) -> pd.DataFrame | None:
+    """A cache that cannot be read is a miss, not a failure: the caller refetches."""
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception as exc:  # noqa: BLE001 - any unreadable file means "refetch"
+        log.warning("discarding unreadable price cache %s: %s", path, exc)
+        return None
+
+
+def _write_cache(df: pd.DataFrame, path) -> None:
+    """Write via a temp file and an atomic rename.
+
+    Concurrent requests for the same ticker (the dashboard fetches the payload
+    and the price chart in parallel) each refresh the live series. Writing in
+    place let one reader see another's half-written file, and two interleaved
+    writers left a permanently corrupt one.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, prefix=f".{path.name}.", suffix=".tmp")
+    os.close(fd)
+    try:
+        df.to_parquet(tmp)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def load_macro(start: str, end: str | None = None, *, use_cache: bool = True) -> pd.DataFrame:
