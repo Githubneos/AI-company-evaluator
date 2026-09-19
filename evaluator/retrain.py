@@ -105,9 +105,14 @@ def decide(panel_frame: pd.DataFrame | None = None, feature_names: list[str] | N
 
     since_incremental = _days_since(state, "last_incremental")
     if since_incremental is None or since_incremental >= INCREMENTAL_DAYS:
-        return RetrainDecision(
-            True, "incremental", f"{since_incremental or 0:.0f} days since last update.", drift_rows
+        # "0 days since last update" is what `None or 0` used to print for a
+        # model that has never been updated, which reads as a fresh one.
+        reason = (
+            "No recorded incremental update."
+            if since_incremental is None
+            else f"{since_incremental:.0f} days since last update."
         )
+        return RetrainDecision(True, "incremental", reason, drift_rows)
 
     return RetrainDecision(
         False,

@@ -199,3 +199,15 @@ class TestCorruptState:
         state.write_text("[1, 2, 3]")
 
         assert rt.decide().mode == "full"
+
+
+def test_a_never_updated_model_is_not_described_as_updated_zero_days_ago(state):
+    from datetime import UTC, datetime
+
+    state.write_text(json.dumps({"last_full": datetime.now(UTC).isoformat()}))
+
+    decision = rt.decide()
+
+    assert decision.mode == "incremental"
+    assert "0 days" not in decision.reason
+    assert "No recorded incremental update" in decision.reason
