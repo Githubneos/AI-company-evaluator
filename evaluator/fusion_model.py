@@ -31,6 +31,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from evaluator.config import ARTIFACT_DIR, TargetSpec, ValidationConfig
+from evaluator.io import atomic_write_bytes, atomic_write_json
 from evaluator.metrics import evaluate
 from evaluator.validation import PurgedWalkForward
 
@@ -132,12 +133,9 @@ def should_prefer(model: FusionModel) -> bool:
 def save(model: FusionModel, target: str) -> None:
     import joblib
 
-    FUSION_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(
-        {"model": model.model, "scaler": model.scaler, "columns": model.columns},
-        FUSION_DIR / f"{target}.joblib",
-    )
-    (FUSION_DIR / f"{target}.json").write_text(json.dumps(model.metrics, indent=2, default=str))
+    payload = {"model": model.model, "scaler": model.scaler, "columns": model.columns}
+    atomic_write_bytes(lambda tmp: joblib.dump(payload, tmp), FUSION_DIR / f"{target}.joblib")
+    atomic_write_json(model.metrics, FUSION_DIR / f"{target}.json", default=str)
 
 
 def load(target: str) -> FusionModel | None:

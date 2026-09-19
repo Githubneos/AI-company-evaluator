@@ -21,7 +21,6 @@ the standardisation.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +31,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
 from evaluator.config import ARTIFACT_DIR
+from evaluator.io import atomic_write_bytes, atomic_write_json, atomic_write_parquet
 
 log = logging.getLogger(__name__)
 
@@ -162,15 +162,10 @@ def build_index(panel_frame: pd.DataFrame, max_rows: int = 400_000, seed: int = 
 def save_index(index: AnalogIndex) -> None:
     import joblib
 
-    ANALOG_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(
-        {"neighbours": index.neighbours, "scaler": index.scaler, "features": index.features},
-        ANALOG_DIR / "index.joblib",
-    )
-    index.reference.to_parquet(ANALOG_DIR / "reference.parquet", index=False)
-    (ANALOG_DIR / "meta.json").write_text(
-        json.dumps({"rows": len(index.reference), "features": index.features}, indent=2)
-    )
+    payload = {"neighbours": index.neighbours, "scaler": index.scaler, "features": index.features}
+    atomic_write_bytes(lambda tmp: joblib.dump(payload, tmp), ANALOG_DIR / "index.joblib")
+    atomic_write_parquet(index.reference, ANALOG_DIR / "reference.parquet", index=False)
+    atomic_write_json({"rows": len(index.reference), "features": index.features}, ANALOG_DIR / "meta.json")
 
 
 def load_index() -> AnalogIndex | None:

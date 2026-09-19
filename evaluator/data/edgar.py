@@ -32,6 +32,7 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 from evaluator.config import CACHE_DIR
+from evaluator.io import atomic_write_parquet, read_parquet_or_none
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +90,10 @@ class EdgarClient:
     ) -> pd.DataFrame:
         """All filings for one company, recent chunk plus paginated history."""
         cache_path = self.cache_dir / f"{ticker}.parquet"
-        if use_cache and cache_path.exists() and not refresh:
-            return pd.read_parquet(cache_path)
+        if use_cache and not refresh:
+            cached = read_parquet_or_none(cache_path)
+            if cached is not None:
+                return cached
 
         payload = self._get_json(SUBMISSIONS_URL.format(cik=cik))
         if payload is None:
@@ -118,8 +121,7 @@ class EdgarClient:
         )
 
         if use_cache:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            frame.to_parquet(cache_path)
+            atomic_write_parquet(frame, cache_path)
         return frame
 
     @staticmethod

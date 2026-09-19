@@ -24,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 
 from evaluator.config import ARTIFACT_DIR, default_targets
+from evaluator.io import atomic_write_json
 from evaluator.monitoring import PSI_RETRAIN_THRESHOLD, feature_drift, should_retrain
 
 log = logging.getLogger(__name__)
@@ -62,8 +63,7 @@ def record_retrain(mode: str) -> None:
     state["last_" + mode] = now
     if mode == "full":
         state["last_incremental"] = now  # a full retrain subsumes an incremental
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2))
+    atomic_write_json(state, STATE_PATH)
 
 
 def _days_since(state: dict, key: str) -> float | None:

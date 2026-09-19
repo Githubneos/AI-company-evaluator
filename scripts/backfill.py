@@ -18,6 +18,7 @@ from evaluator.config import CACHE_DIR
 from evaluator.data.edgar import EdgarClient, load_filings
 from evaluator.data.universe import load_universe, sector_etfs
 from evaluator.events import UNPOPULATED_TYPES, build_event_table
+from evaluator.io import atomic_write_parquet
 
 log = logging.getLogger("backfill")
 
@@ -46,8 +47,7 @@ def backfill_prices(start: str, end: str | None, limit: int | None) -> pd.DataFr
             log.info("prices %d/%d", i, len(tickers))
 
     panel = pd.concat(frames, ignore_index=True)
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    panel.to_parquet(PRICES_PATH, index=False)
+    atomic_write_parquet(panel, PRICES_PATH, index=False)
     log.info("wrote %s rows to %s", f"{len(panel):,}", PRICES_PATH)
     return panel
 
@@ -64,8 +64,7 @@ def backfill_events(limit: int | None) -> pd.DataFrame:
     filings = load_filings(list(ciks), ciks, client=EdgarClient())
     events = build_event_table(filings)
 
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    events.to_parquet(EVENTS_PATH, index=False)
+    atomic_write_parquet(events, EVENTS_PATH, index=False)
     log.info("wrote %s events to %s", f"{len(events):,}", EVENTS_PATH)
     return events
 

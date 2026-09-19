@@ -27,6 +27,7 @@ import pandas as pd
 from evaluator.config import ARTIFACT_DIR, TargetSpec, default_targets
 from evaluator.data.universe import load_universe
 from evaluator.dataset import build_dataset
+from evaluator.io import atomic_write_json, atomic_write_parquet
 
 log = logging.getLogger(__name__)
 
@@ -140,23 +141,20 @@ def build_panel(
     label_names = [c for c in panel.columns if c.startswith(("label_", "forward_"))]
     schema = schema_hash(feature_names)
 
-    STORE_DIR.mkdir(parents=True, exist_ok=True)
-    panel.to_parquet(PANEL_PATH, index=False)
-    META_PATH.write_text(
-        json.dumps(
-            {
-                "schema": schema,
-                "feature_names": feature_names,
-                "label_names": label_names,
-                "tickers": int(panel["ticker"].nunique()),
-                "rows": int(len(panel)),
-                "start": str(panel["date"].min().date()),
-                "end": str(panel["date"].max().date()),
-                "failures": failures,
-                "targets": [t.name for t in targets],
-            },
-            indent=2,
-        )
+    atomic_write_parquet(panel, PANEL_PATH, index=False)
+    atomic_write_json(
+        {
+            "schema": schema,
+            "feature_names": feature_names,
+            "label_names": label_names,
+            "tickers": int(panel["ticker"].nunique()),
+            "rows": int(len(panel)),
+            "start": str(panel["date"].min().date()),
+            "end": str(panel["date"].max().date()),
+            "failures": failures,
+            "targets": [t.name for t in targets],
+        },
+        META_PATH,
     )
     log.info("panel: %s rows, %s tickers, schema %s", f"{len(panel):,}", panel["ticker"].nunique(), schema)
 

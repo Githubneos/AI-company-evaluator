@@ -17,6 +17,7 @@ from pathlib import Path
 
 from evaluator.config import ARTIFACT_DIR
 from evaluator.feedback.postmortem import tag_summary
+from evaluator.io import atomic_write_text
 from evaluator.model.predict import available_targets, load_model
 from evaluator.monitoring import system_report
 
@@ -119,8 +120,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     path = Path(args.out) if args.out else REPORT_DIR / "report.html"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_html())
+    atomic_write_text(build_html(), path)
     print(f"wrote {path}")
 
 

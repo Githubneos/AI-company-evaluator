@@ -31,6 +31,7 @@ import pandas as pd
 from evaluator.config import CACHE_DIR
 from evaluator.data.edgar import EdgarClient
 from evaluator.features.build import _as_ns
+from evaluator.io import atomic_write_parquet, read_parquet_or_none
 
 log = logging.getLogger(__name__)
 
@@ -171,8 +172,10 @@ def load_fundamentals(
     use_cache: bool = True,
 ) -> pd.DataFrame:
     cache_path = Path(CACHE_DIR) / "fundamentals" / f"{ticker}.parquet"
-    if use_cache and cache_path.exists():
-        return pd.read_parquet(cache_path)
+    if use_cache:
+        cached = read_parquet_or_none(cache_path)
+        if cached is not None:
+            return cached
 
     client = client or EdgarClient()
     payload = client._get_json(COMPANYFACTS_URL.format(cik=cik))
@@ -181,8 +184,7 @@ def load_fundamentals(
 
     frame = extract_fundamentals(payload["facts"])
     if use_cache:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(cache_path, index=False)
+        atomic_write_parquet(frame, cache_path, index=False)
     return frame
 
 

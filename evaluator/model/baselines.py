@@ -42,6 +42,7 @@ import pandas as pd
 from evaluator.config import TargetSpec
 from evaluator.features.build import FEATURE_DESCRIPTIONS
 from evaluator.features.store import FeaturePanel
+from evaluator.io import atomic_write_json
 from evaluator.metrics import brier_score, evaluate
 from evaluator.model.train import MIN_REGIME_ROWS, MODEL_DIR, PanelTrainConfig, walk_forward
 from evaluator.regimes import regime_for
@@ -295,7 +296,7 @@ def evaluate_baselines(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainCon
             incremental[f"vs_{reference}"], reference,
         ),
     }
-    (MODEL_DIR / spec.name / "baselines.json").write_text(json.dumps(report, indent=2))
+    atomic_write_json(report, MODEL_DIR / spec.name / "baselines.json")
     return report
 
 

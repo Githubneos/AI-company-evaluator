@@ -37,6 +37,7 @@ import pandas as pd
 
 from evaluator.config import ARTIFACT_DIR, TargetSpec, ValidationConfig, default_targets
 from evaluator.features.store import FeaturePanel, load_panel
+from evaluator.io import atomic_write_bytes, atomic_write_json
 from evaluator.metrics import calibration_bins, evaluate
 from evaluator.regimes import regime_for
 from evaluator.validation import PurgedWalkForward
@@ -384,16 +385,19 @@ def train_target(
 
     out_dir = MODEL_DIR / spec.name
     out_dir.mkdir(parents=True, exist_ok=True)
-    final.save_model(str(out_dir / "model.txt"))
+    atomic_write_bytes(lambda tmp: final.save_model(tmp), out_dir / "model.txt")
     # The optional fusion model must be fitted on these out-of-fold GBM
     # probabilities, never on predictions from the final model that was trained
     # on the same labels.  Persisting this small validation artifact makes that
     # provenance enforceable instead of relying on a caller convention.
-    np.savez_compressed(
+    atomic_write_bytes(
+        lambda tmp: np.savez_compressed(
+            tmp,
+            y=all_true,
+            probabilities=all_proba,
+            dates=all_dates.to_numpy(dtype="datetime64[ns]"),
+        ),
         out_dir / "oos_predictions.npz",
-        y=all_true,
-        probabilities=all_proba,
-        dates=all_dates.to_numpy(dtype="datetime64[ns]"),
     )
 
     metadata = {
@@ -424,7 +428,7 @@ def train_target(
             "event taxonomy -- 8-K item codes cannot express them.",
         ],
     }
-    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str))
+    atomic_write_json(metadata, out_dir / "metadata.json", default=str)
     _log_to_mlflow(spec, cfg, metadata)
     return metadata
 
@@ -474,16 +478,14 @@ def train_all(
             # process OOM-killed partway through the six targets, so collect
             # explicitly between them.
             gc.collect()
-    (MODEL_DIR / "index.json").write_text(
-        json.dumps(
-            {
-                name: {
-                    "brier_skill": meta["validation"]["pooled_out_of_sample"]["brier_skill"],
-                    "macro_auc": meta["validation"]["pooled_out_of_sample"]["macro_auc"],
-                }
-                for name, meta in results.items()
-            },
-            indent=2,
-        )
+    atomic_write_json(
+        {
+            name: {
+                "brier_skill": meta["validation"]["pooled_out_of_sample"]["brier_skill"],
+                "macro_auc": meta["validation"]["pooled_out_of_sample"]["macro_auc"],
+            }
+            for name, meta in results.items()
+        },
+        MODEL_DIR / "index.json",
     )
     return results
