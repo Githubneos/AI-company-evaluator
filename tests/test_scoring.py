@@ -148,3 +148,23 @@ def test_a_day_with_no_stored_scores_is_named_not_called_a_missing_run(scores_di
 
     assert board["available"] is False
     assert "2020-01-02" in board["reason"] and "2026-09-18" in board["reason"]
+
+
+def test_an_unknown_target_is_an_error_not_an_empty_board(scores_dir):
+    _write_table(scores_dir, [{"ticker": "AAA", "sector": "Energy", "target": "magnitude_1d", "probability": 0.3}])
+
+    with pytest.raises(scoring.UnknownTarget, match="magnitude_1d"):
+        scoring.leaderboard("direction_99d")
+
+
+def test_the_leaderboard_endpoint_answers_404_for_an_unknown_target(scores_dir):
+    from fastapi.testclient import TestClient
+
+    import evaluator.serving.app as serving
+
+    _write_table(scores_dir, [{"ticker": "AAA", "sector": "Energy", "target": "magnitude_1d", "probability": 0.3}])
+
+    response = TestClient(serving.app).get("/leaderboard?target=direction_99d")
+
+    assert response.status_code == 404
+    assert "magnitude_1d" in response.json()["detail"]

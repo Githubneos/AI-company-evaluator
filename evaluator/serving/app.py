@@ -27,7 +27,7 @@ from evaluator.llm.provider import LLMUnavailable
 from evaluator.model.predict import ModelNotTrained, available_targets, load_model, score_ticker
 from evaluator.model.registry import load_report
 from evaluator.monitoring import system_report
-from evaluator.scoring import DEFAULT_TARGET, leaderboard
+from evaluator.scoring import DEFAULT_TARGET, UnknownTarget, leaderboard
 from evaluator.serving.auth import API_KEY_HEADER, authorize, identify, is_public, limiter
 
 log = logging.getLogger(__name__)
@@ -128,7 +128,10 @@ def leaderboard_view(
     Served from the stored table: this endpoint never scores on demand, which
     is what keeps it fast and what makes the staleness flag meaningful.
     """
-    return leaderboard(target, sector=sector, limit=limit, as_of=as_of)
+    try:
+        return leaderboard(target, sector=sector, limit=limit, as_of=as_of)
+    except UnknownTarget as exc:
+        raise _not_found(exc) from exc
 
 
 @app.get("/prices/{ticker}")

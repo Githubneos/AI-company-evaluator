@@ -33,6 +33,10 @@ LATEST_PATH = SCORES_DIR / "latest.json"
 DEFAULT_TARGET = TargetSpec(1, MAGNITUDE).name
 
 
+class UnknownTarget(ValueError):
+    """The requested target is not in the scored table."""
+
+
 def score_path(as_of: str) -> Path:
     return SCORES_DIR / f"{as_of}.parquet"
 
@@ -198,6 +202,12 @@ def leaderboard(
             "rows": [],
         }
 
+    known = sorted(scores["target"].unique().tolist())
+    if target not in known:
+        # An empty board that says "available" reads as "nothing is risky",
+        # which is the opposite of "that is not a model we scored".
+        raise UnknownTarget(f"unknown target {target!r}. Scored targets: {', '.join(known)}")
+
     subset = scores[scores["target"] == target]
     if sector:
         subset = subset[subset["sector"] == sector]
@@ -219,7 +229,7 @@ def leaderboard(
         "sector": sector,
         "tickers_scored": int(scores["ticker"].nunique()),
         "failures": len(summary.get("failures", {})) if is_latest else None,
-        "targets": sorted(scores["target"].unique().tolist()),
+        "targets": known,
         "sectors": sorted(scores["sector"].dropna().unique().tolist()),
         "stale_trading_days": stale_by,
         "stale": stale_by > 1,
@@ -255,6 +265,7 @@ __all__ = [
     "DEFAULT_TARGET",
     "LATEST_PATH",
     "SCORES_DIR",
+    "UnknownTarget",
     "latest_summary",
     "leaderboard",
     "load_scores",
