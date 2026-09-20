@@ -1610,6 +1610,7 @@
     animateIn(view);
     let m;
     try {
+      loadValidation();
       m = await api("/monitoring", { signal: state.controller.signal });
     } catch (err) {
       if (err.name === "AbortError" || stale(token)) return;
@@ -1621,7 +1622,7 @@
     const fl = m.feedback_loop || {};
     const pr = m.predictions || {};
     const tags = m.post_mortem_tags || {};
-    const known = new Set(["feedback_loop", "predictions", "post_mortem_tags"]);
+    const known = new Set(["feedback_loop", "predictions", "post_mortem_tags", "live_skill"]);
     const extra = Object.entries(m).filter(([k]) => !known.has(k));
 
     const shareBars = (obj, colorOf) => {
@@ -1655,6 +1656,7 @@
         <div class="stat"><span class="eyebrow">Days to resolve</span>${num(fl.mean_days_to_resolution, "f2")}</div>
       </div>
       <div class="grid grid-12">
+        ${liveSkillCard(m.live_skill, state.validation && Object.fromEntries(Object.entries(state.validation).map(([k, v]) => [k, v.validation.pooled_out_of_sample])))}
         <section class="card span-6"><div class="card-head"><div><h2 class="card-title">${ICON.split} Predicted classes</h2>
           <p class="card-sub">Share of logged predictions${isNum(pr.recent_predictions) ? ` · ${pr.recent_predictions} in the last ${pr.recent_window_days} days` : ""}.</p></div></div>
           ${shareBars(pr.class_share, classColor)}</section>
@@ -1691,6 +1693,46 @@
         btn.innerHTML = `${ICON.refresh} Resolve elapsed predictions`;
       }
     });
+  }
+
+  /** Skill on predictions the system actually issued, next to the backtest. */
+  function liveSkillCard(live, validation) {
+    const entries = Object.values((live && live.targets) || {});
+    const ordered = TARGETS.map((t) => entries.find((e) => e.target === t)).filter(Boolean);
+    if (!ordered.length) {
+      return `<section class="card span-12"><div class="card-head"><div><h2 class="card-title">${ICON.pulse} Live track record</h2>
+        <p class="card-sub">No resolved predictions yet. The nightly job logs every score, and outcomes resolve once their
+          window closes \u2014 ${live && live.min_rows ? live.min_rows : 200} per target before skill means anything.</p></div></div></section>`;
+    }
+    const rows = ordered.map((e, i) => {
+      const backtest = ((validation || {})[e.target] || {}).brier_skill;
+      const live_skill = e.sufficient ? e.brier_skill : null;
+      const tone = isNum(live_skill) ? toneOf(live_skill) : "";
+      return `
+        <div class="abl-row" style="--i:${i};grid-template-columns:minmax(0,200px) 1fr 150px">
+          <div class="abl-name">${esc(targetLabel(e.target))}<small>${e.n.toLocaleString()} resolved \u00b7 ${esc(e.first)} \u2192 ${esc(e.last)}</small></div>
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <span class="small muted">backtest <span class="mono ${toneOf(backtest)}">${fmt(backtest, "s4")}</span></span>
+            <span class="small">live <span class="mono ${tone}">${e.sufficient ? signed(e.brier_skill, 4) : "\u2014"}</span></span>
+            <span class="xs muted">accuracy ${fmt(e.accuracy, "pct1")}</span>
+          </div>
+          <div class="abl-stat">
+            <span class="chip ${e.sufficient ? (live_skill > 0 ? "chip-pos" : "chip-neg") : "chip-warn"}" style="height:20px">
+              ${e.sufficient ? (live_skill > 0 ? "beating base rate" : "below base rate") : "not enough data"}</span>
+          </div>
+        </div>`;
+    }).join("");
+    return `
+      <section class="card span-12">
+        <div class="card-head"><div><h2 class="card-title">${ICON.pulse} Live track record</h2>
+          <p class="card-sub">Skill on predictions the system actually issued, scored against the base rate those
+            outcomes turned out to have. A target needs ${live.min_rows} resolved predictions before its number means anything.</p></div>
+          <span class="chip">${(live.resolved_total || 0).toLocaleString()} resolved</span>
+        </div>
+        <div class="abl grown">${rows}</div>
+        ${live.any_sufficient ? "" : `<p class="xs muted" style="margin-top:12px">Every target is still below the ${live.min_rows}-prediction floor,
+          so the live column is deliberately blank: a handful of resolved calls is a count, not a result.</p>`}
+      </section>`;
   }
 
   function kvBlock(val) {

@@ -396,6 +396,29 @@ initiates at its 2013 spin-off.
 New features: `days_since_dividend_cut`, `days_since_dividend_raise` and
 `dividend_cuts_365d`. They reach the models at the next panel rebuild.
 
+### Live track record
+
+Everything above is a backtest: a claim about the past, made by the people who
+chose the folds. The record is what the system predicted before the outcome was
+known. The nightly scoring run logs every score to the prediction log, and
+`resolve_pending` closes each one out when its window elapses — on the right
+yardstick for its kind: absolute move for magnitude, signed move for direction,
+and **move minus the sector's** for the sector-relative models.
+
+`live_skill()` scores those resolved predictions against the base rate the
+outcomes actually had, the same definition training uses, and the Monitoring
+page shows it beside each model's backtest figure. Below **200 resolved
+predictions per target the live column stays blank**: a handful of resolved
+calls is a count, not a result, and a number there would invite exactly the
+over-reading this project tries to avoid.
+
+The prediction log's schema was rebuilt to carry a target, a kind and the full
+probability vector, because the original table hard-coded three direction
+probabilities as NOT NULL and a magnitude prediction has no DROP probability to
+put in one. SQLite cannot relax a constraint in place, so the migration copies
+the table and refuses to proceed if the row count would change: the log is the
+one artifact here that cannot be rebuilt from anything else.
+
 ## Known defects
 
 - **Survivorship bias: reduced, not fixed.** The panel now uses historical index

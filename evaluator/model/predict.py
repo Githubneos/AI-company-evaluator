@@ -21,11 +21,11 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from evaluator.config import DIRECTION, LabelConfig, TargetSpec, default_targets
+from evaluator.config import DIRECTION, REL_DIRECTION, LabelConfig, TargetSpec, default_targets
 from evaluator.dataset import build_dataset
 from evaluator.features.build import FEATURE_DESCRIPTIONS
 from evaluator.features.store import align_to_schema
-from evaluator.labels import label_scale
+from evaluator.labels import label_scale, relative_label_scale
 from evaluator.model import registry
 
 log = logging.getLogger(__name__)
@@ -167,11 +167,20 @@ def score_ticker(
     )
     row = dataset.latest_row()
     scale = label_scale(dataset.prices, label_cfg).iloc[-1]
+    # A sector-relative call is judged against the volatility of the *excess*
+    # return, not the stock's own: the same yardstick its label was built with.
+    relative_scale = relative_label_scale(dataset.prices, dataset.sector_prices, label_cfg)
 
     scored = {}
     for name in names:
         try:
             scored[name] = score_target(name, row)
+            spec_kind = scored[name]["kind"]
+            horizon = scored[name]["horizon_days"]
+            base = relative_scale if spec_kind == REL_DIRECTION else scale
+            scored[name]["label_scale"] = (
+                None if base is None or pd.isna(base) else float(base * np.sqrt(horizon / label_cfg.horizon_days))
+            )
         except Exception as exc:  # noqa: BLE001 - one model must not sink the response
             log.warning("scoring %s failed for %s: %s", name, ticker, exc)
 

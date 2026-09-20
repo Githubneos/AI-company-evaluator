@@ -67,6 +67,26 @@ def make_labels(prices: pd.DataFrame, cfg: LabelConfig) -> pd.DataFrame:
     )
 
 
+def relative_label_scale(
+    prices: pd.DataFrame, sector: pd.DataFrame | None, cfg: LabelConfig
+) -> float | None:
+    """Trailing volatility of the excess return, for the most recent bar.
+
+    Serving needs this for the same reason `label_scale` exists: to turn a
+    realised move into the z-score the model was trained against.
+    """
+    if sector is None or getattr(sector, "empty", True):
+        return None
+    close = prices["close"]
+    aligned = sector["close"].reindex(close.index)
+    if aligned.notna().sum() < cfg.vol_lookback:
+        return None
+    excess = close.pct_change() - aligned.ffill().pct_change()
+    scale = realized_vol(excess, cfg.vol_lookback) * np.sqrt(cfg.horizon_days)
+    value = scale.iloc[-1]
+    return None if pd.isna(value) else float(value)
+
+
 def make_relative_labels(
     prices: pd.DataFrame, sector: pd.DataFrame | None, cfg: LabelConfig
 ) -> pd.DataFrame:

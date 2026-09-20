@@ -37,9 +37,13 @@ def score_path(as_of: str) -> Path:
     return SCORES_DIR / f"{as_of}.parquet"
 
 
-def _row(result: dict, sector: str | None) -> list[dict]:
-    """One row per (ticker, target), flat enough for a table."""
-    rows = []
+def _rows(result: dict, sector: str | None) -> tuple[list[dict], list[dict]]:
+    """Two shapes of the same scores: flat table rows, and prediction-log rows.
+
+    The table is a parquet the API serves; the log keeps the full probability
+    vector per target, whose classes differ by kind.
+    """
+    rows, predictions = [], []
     for name, scored in result.get("targets", {}).items():
         probabilities = scored["probabilities"]
         baseline = scored.get("baseline_probabilities") or {}
@@ -63,7 +67,23 @@ def _row(result: dict, sector: str | None) -> list[dict]:
                 "move_threshold_pct": result.get("move_threshold_pct"),
             }
         )
-    return rows
+        predictions.append(
+            {
+                "ticker": result["ticker"],
+                "as_of": result["as_of"],
+                "target": name,
+                "kind": scored["kind"],
+                "horizon_days": int(scored["horizon_days"]),
+                "threshold_sigmas": float(result.get("threshold_sigmas", 1.0)),
+                # Each kind is judged on its own scale: the sector-relative
+                # models against the volatility of the excess return.
+                "label_scale": scored.get("label_scale"),
+                "last_close": result.get("last_close"),
+                "probabilities": probabilities,
+                "predicted_class": scored["predicted_class"],
+            }
+        )
+    return rows, predictions
 
 
 def score_universe(
@@ -71,8 +91,14 @@ def score_universe(
     *,
     lookback_start: str = "2015-01-01",
     limit: int | None = None,
+    log_predictions: bool = True,
 ) -> dict:
-    """Score every name from the production models and persist the table."""
+    """Score every name from the production models and persist the table.
+
+    Every score is also written to the prediction log, which is what turns a
+    backtest into a live track record: a prediction not recorded when it was
+    made cannot be scored honestly later.
+    """
     if not available_targets():
         raise ModelNotTrained("no promoted models. Run: python -m scripts.promote --apply")
 
@@ -84,11 +110,14 @@ def score_universe(
 
     started = datetime.now(UTC)
     rows: list[dict] = []
+    predictions: list[dict] = []
     failures: dict[str, str] = {}
     for i, ticker in enumerate(names, start=1):
         try:
             result = score_ticker(ticker, lookback_start=lookback_start)
-            rows.extend(_row(result, sectors.get(ticker)))
+            scored_rows, scored_predictions = _rows(result, sectors.get(ticker))
+            rows.extend(scored_rows)
+            predictions.extend(scored_predictions)
         except Exception as exc:  # noqa: BLE001 - one name must not sink the run
             failures[ticker] = f"{type(exc).__name__}: {exc}"
             log.warning("scoring failed for %s: %s", ticker, exc)
@@ -100,6 +129,11 @@ def score_universe(
 
     frame = pd.DataFrame(rows)
     as_of = str(frame["as_of"].max())
+    logged = 0
+    if log_predictions and predictions:
+        from evaluator.feedback.store import log_predictions as record
+
+        logged = len(record(predictions))
     SCORES_DIR.mkdir(parents=True, exist_ok=True)
     atomic_write_parquet(frame, score_path(as_of), index=False)
 
@@ -111,6 +145,7 @@ def score_universe(
         "rows": int(len(frame)),
         "targets": sorted(frame["target"].unique()),
         "failures": failures,
+        "logged_predictions": logged,
         "file": score_path(as_of).name,
     }
     atomic_write_json(summary, LATEST_PATH)

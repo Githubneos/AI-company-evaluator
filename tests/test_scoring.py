@@ -29,6 +29,9 @@ def _scored(ticker: str, probability: float, as_of: str = "2026-09-18") -> dict:
 
 @pytest.fixture
 def scores_dir(tmp_path, monkeypatch):
+    import evaluator.feedback.store as store
+
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "predictions.db")  # never the real log
     monkeypatch.setattr(scoring, "SCORES_DIR", tmp_path)
     monkeypatch.setattr(scoring, "LATEST_PATH", tmp_path / "latest.json")
     monkeypatch.setattr(scoring, "available_targets", lambda: ["magnitude_1d"])

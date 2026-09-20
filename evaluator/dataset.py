@@ -33,6 +33,9 @@ class Dataset:
     labels: pd.DataFrame
     prices: pd.DataFrame
     ticker: str
+    #: The sector ETF's bars, when there are any: what a sector-relative
+    #: prediction is measured against, at serving time as well as training.
+    sector_prices: pd.DataFrame | None = None
 
     @property
     def feature_names(self) -> list[str]:
@@ -155,4 +158,6 @@ def build_dataset(
     labels = pd.DataFrame(label_frames, index=prices.index)
     labels["label"] = labels.get(f"label_direction_{label_cfg.horizon_days}d")
 
-    return Dataset(features=features, labels=labels, prices=prices, ticker=ticker)
+    return Dataset(
+        features=features, labels=labels, prices=prices, ticker=ticker, sector_prices=sector_prices
+    )

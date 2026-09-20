@@ -181,9 +181,14 @@ def prediction_distribution(db_path=DB_PATH, window_days: int = 90) -> dict:
 
 
 def system_report(reference: pd.DataFrame | None = None, live: pd.DataFrame | None = None) -> dict:
+    from evaluator.feedback.store import live_skill
+
     report = {
         "feedback_loop": feedback_health(),
         "predictions": prediction_distribution(),
+        # The backtest is a claim about the past; this is the record of what the
+        # system actually predicted and how it turned out.
+        "live_skill": live_skill(),
     }
     if reference is not None and live is not None:
         drift = feature_drift(reference, live)
