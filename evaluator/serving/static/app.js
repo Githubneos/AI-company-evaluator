@@ -103,16 +103,26 @@
     $("#progress").classList.toggle("active", inflight > 0);
   };
 
+  const apiKey = () => store.get("ace-api-key", "") || "";
+
   async function api(path, { signal, method = "GET", quiet = false } = {}) {
     if (!quiet) busy(1);
     try {
-      const res = await fetch(path, { method, signal, headers: { Accept: "application/json" } });
+      const headers = { Accept: "application/json" };
+      const key = apiKey();
+      if (key) headers["X-API-Key"] = key;
+      const res = await fetch(path, { method, signal, headers });
       let body = null;
       try { body = await res.json(); } catch (_) { /* empty or non-JSON body */ }
       if (!res.ok) {
         const detail = body && body.detail ? (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : `${res.status} ${res.statusText}`;
         const err = new Error(detail);
         err.status = res.status;
+        if (res.status === 401) openKeyDialog(detail);
+        if (res.status === 429) {
+          const wait = parseInt(res.headers.get("Retry-After") || "0", 10);
+          toast(`Rate limited \u2014 try again in ${wait || "a moment"}${wait ? "s" : ""}.`);
+        }
         throw err;
       }
       return body;
@@ -235,6 +245,86 @@
     syncSeg(segEl);
   }
 
+  /** A server's reason is a fragment; give it terminal punctuation. */
+  const sentence = (text) => (!text ? "" : /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
+
+  /** Accessible key dialog: focus trapped, Escape closes, key stored per browser. */
+  function openKeyDialog(reason = "") {
+    if ($("#key-dialog")) return;
+    const previous = document.activeElement;
+    const host = document.createElement("div");
+    host.className = "backdrop";
+    host.id = "key-dialog";
+    host.innerHTML = `
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="key-title" aria-describedby="key-why">
+        <h2 id="key-title">${ICON.alert} API key needed</h2>
+        <p id="key-why">${esc(sentence(reason) || "This server requires a key for everything but the dashboard itself.")}
+          It is stored in this browser only, and sent as the <code class="mono">X-API-Key</code> header.</p>
+        <div class="field">
+          <label for="key-input">API key</label>
+          <div class="row">
+            <input id="key-input" type="password" autocomplete="off" spellcheck="false" value="${esc(apiKey())}"
+                   placeholder="paste your key">
+            <button type="button" class="btn" id="key-reveal" aria-label="Show the key" aria-pressed="false">Show</button>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-ghost" id="key-clear">Clear</button>
+          <button type="button" class="btn btn-ghost" id="key-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="key-save">Save &amp; retry</button>
+        </div>
+      </div>`;
+    document.body.appendChild(host);
+    const input = $("#key-input", host);
+    input.focus();
+    input.select();
+
+    const close = () => {
+      host.remove();
+      if (previous && previous.focus) previous.focus();
+    };
+    host.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") close();
+      if (e.key !== "Tab") return;
+      // Focus trap: the dialog is modal, so Tab must not leave it.
+      const focusable = $$("button, input", host);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    host.addEventListener("click", (e) => {
+      if (e.target === host) return close();
+      const id = e.target.closest("button")?.id;
+      if (id === "key-reveal") {
+        const shown = input.type === "text";
+        input.type = shown ? "password" : "text";
+        e.target.textContent = shown ? "Show" : "Hide";
+        e.target.setAttribute("aria-pressed", String(!shown));
+        e.target.setAttribute("aria-label", shown ? "Show the key" : "Hide the key");
+      } else if (id === "key-clear") {
+        store.set("ace-api-key", "");
+        updateKeyStatus();
+        close();
+      } else if (id === "key-cancel") {
+        close();
+      } else if (id === "key-save") {
+        store.set("ace-api-key", input.value.trim());
+        updateKeyStatus();
+        close();
+        onRoute();
+      }
+    });
+  }
+
+  function updateKeyStatus() {
+    const el = $("#key-status");
+    if (!el) return;
+    const key = apiKey();
+    el.innerHTML = `<span class="dot ${key ? "ok" : ""}"></span><span>${key ? "API key set" : "No API key"}</span>`;
+    el.title = key ? "Stored in this browser only" : "Only needed if this server requires one";
+  }
+
   function toast(message, tone = "") {
     const el = document.createElement("div");
     el.className = `toast ${tone}`;
@@ -287,6 +377,8 @@
       const h = await api("/health", { quiet: true });
       const n = (h.trained_targets || []).length;
       el.innerHTML = `<span class="dot ${n ? "ok" : "bad"}"></span><span>API online · ${n} model${n === 1 ? "" : "s"}</span>`;
+      // Only ask for a key on a server that actually wants one.
+      if (h.auth === "api-key" && !apiKey()) openKeyDialog();
     } catch (_) {
       el.innerHTML = '<span class="dot bad"></span><span>API unreachable</span>';
     }
@@ -1767,6 +1859,8 @@
   function boot() {
     setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
     $("#theme-toggle").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
+    $("#key-button").addEventListener("click", () => openKeyDialog());
+    updateKeyStatus();
     const topbar = $("#topbar");
     addEventListener("scroll", () => topbar.classList.toggle("scrolled", scrollY > 4), { passive: true });
     addEventListener("resize", () => { updateNav(state.route ? state.route.name : "evaluate"); $$(".seg").forEach(syncSeg); });

@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from evaluator.data.universe import cik_for, load_universe
@@ -27,6 +27,7 @@ from evaluator.model.predict import ModelNotTrained, available_targets, load_mod
 from evaluator.model.registry import load_report
 from evaluator.monitoring import system_report
 from evaluator.scoring import DEFAULT_TARGET, leaderboard
+from evaluator.serving.auth import API_KEY_HEADER, authorize, identify, is_public, limiter
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,28 @@ app = FastAPI(
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def guard(request, call_next):
+    """Authenticate and rate-limit before anything expensive runs."""
+    path = request.url.path
+    presented = request.headers.get(API_KEY_HEADER)
+    client = request.client.host if request.client else None
+
+    allowed, reason = authorize(path, presented, client)
+    if not allowed:
+        return JSONResponse({"detail": reason}, status_code=401)
+
+    if not is_public(path):
+        within, retry_after = limiter.check(identify(presented, client), path)
+        if not within:
+            return JSONResponse(
+                {"detail": f"rate limit exceeded for {path}; retry in {retry_after}s"},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -68,7 +91,14 @@ def dashboard() -> FileResponse:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "trained_targets": available_targets()}
+    from evaluator.serving.auth import configured_keys
+
+    return {
+        "status": "ok",
+        "trained_targets": available_targets(),
+        # The dashboard needs to know whether to ask for a key.
+        "auth": "api-key" if configured_keys() else "local-only",
+    }
 
 
 @app.get("/universe")

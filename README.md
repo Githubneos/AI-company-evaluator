@@ -419,6 +419,34 @@ put in one. SQLite cannot relax a constraint in place, so the migration copies
 the table and refuses to proceed if the row count would change: the log is the
 one artifact here that cannot be rebuilt from anything else.
 
+### Who can call this, and how often
+
+`/evaluate` spends an LLM call per request and `/sentiment` runs FinBERT over
+freshly fetched news, so the API has a door:
+
+- **`EVALUATOR_API_KEYS` set** (comma-separated): everything except the
+  dashboard, its static files and `/health` needs an `X-API-Key` header. Keys
+  are compared with `hmac.compare_digest`, because `==` on a secret leaks how
+  much of it matched through how long the comparison took.
+- **Not set**: the costly endpoints answer **loopback callers only**. That way
+  a laptop keeps working and a server exposed to a network by accident does
+  not become someone's free inference endpoint.
+
+Rate limits are token buckets per key (or per caller address when no keys are
+set): 10/hour for `/evaluate`, 30/hour for `/sentiment`, 240/min for the rest,
+returning 429 with `Retry-After`. **They live in this process's memory**, so
+two workers mean two buckets and a restart forgets them; a real deployment
+should move this to the proxy or to Redis. That is a limitation, not a design.
+
+The dashboard asks for a key only when the server says it needs one, stores it
+in that browser alone, and shows its status in the sidebar. A 429 surfaces as a
+toast with the retry time.
+
+```bash
+EVALUATOR_API_KEYS="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+  uvicorn evaluator.serving.app:app
+```
+
 ## Known defects
 
 - **Survivorship bias: reduced, not fixed.** The panel now uses historical index
