@@ -247,6 +247,53 @@ reasons to be treated as research-only: a four-feature volatility model beats
 python -m scripts.evaluate_vol_benchmarks --targets magnitude_1d   # ~3 min, ~1.1 GB
 ```
 
+### The rebuild: a look-ahead bug, and what the gate did with the candidates
+
+Rebuilding the panel with historical membership, dividends and the new target
+turned up something in the **old** panel: 621,211 rows — **25% of it** — were
+dated before the company had joined the index. The `date_added` filter had not
+been taking effect, so every published number above was computed on a panel
+containing a quarter of look-ahead rows. The membership filter fixes it and
+fails safe (a name with no membership record contributes nothing at all).
+
+The rebuilt panel: 2,125,096 rows, 600 names, 47 features, 21 label columns.
+Nine candidates trained in 18 minutes (about 90 seconds each, 1.7 GB peak).
+
+| target | candidate | incumbent | rate-hike regime |
+|---|---|---|---|
+| magnitude_1d | +0.0397 | +0.0435 | +0.0211 |
+| magnitude_5d | +0.0363 | +0.0382 | **−0.0331** |
+| magnitude_20d | +0.0375 | +0.0292 | +0.0041 |
+| direction_1d | +0.0209 | +0.0158 | +0.0155 |
+| direction_5d | +0.0176 | +0.0156 | **−0.0320** |
+| direction_20d | +0.0218 | +0.0171 | **−0.0175** |
+| **rel_direction_1d** | +0.0235 | — | **+0.0156** |
+| **rel_direction_5d** | +0.0282 | — | **+0.0213** |
+| **rel_direction_20d** | +0.0267 | — | **+0.0247** |
+
+**The sector-relative target works.** It beats raw direction at every horizon,
+and — the point of the exercise — all three are **positive in every regime,
+including the 2022–23 rate hikes** where every raw direction model still loses.
+Removing the market and sector component removes the part these models were
+never forecasting.
+
+The gate promoted 4 of 9 and refused 5, each for a different reason:
+
+| target | gate | reason |
+|---|---|---|
+| direction_1d | promote | +0.0058 on 199,348 shared rows, no regime regression |
+| rel_direction_{1,5,20}d | promote | no incumbent, positive skill |
+| magnitude_1d | hold | **worse** on 399,076 shared rows (−0.0045, 90% CI −0.0078..−0.0014) |
+| magnitude_5d | hold | −0.0022 on shared rows: not an improvement |
+| magnitude_20d | hold | better overall (+0.0091) but regresses in rate hikes |
+| direction_5d, direction_20d | hold | better overall, regress in the COVID crash |
+
+`magnitude_1d` is the instructive one. Its pooled skill fell from +0.0435 to
++0.0397, which could be blamed on a harder universe — but on the 399k rows
+*both* models scored out of fold, the new one is genuinely worse, with an
+interval clear of zero. Pooled comparison across two training runs would have
+hidden that; the shared-row comparison is why the gate exists.
+
 ### A target the model might actually be able to forecast
 
 Raw direction is dominated by what the market and the sector did that week,

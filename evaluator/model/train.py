@@ -39,7 +39,7 @@ from evaluator.config import ARTIFACT_DIR, TargetSpec, ValidationConfig, default
 from evaluator.features.store import FeaturePanel, load_panel
 from evaluator.io import atomic_write_bytes, atomic_write_json
 from evaluator.metrics import calibration_bins, evaluate
-from evaluator.model.registry import CANDIDATE_DIR
+from evaluator.model.registry import CANDIDATE_DIR, REPORTS
 from evaluator.regimes import regime_for
 from evaluator.validation import PurgedWalkForward
 
@@ -410,6 +410,10 @@ def train_target(
 
     out_dir = MODEL_DIR / spec.name
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Analysis reports describe the model they were run against. Leaving last
+    # run's behind would promote stale evidence with a new model.
+    for report in REPORTS:
+        (out_dir / f"{report}.json").unlink(missing_ok=True)
     atomic_write_bytes(lambda tmp: final.save_model(tmp), out_dir / "model.txt")
     # The optional fusion model must be fitted on these out-of-fold GBM
     # probabilities, never on predictions from the final model that was trained
