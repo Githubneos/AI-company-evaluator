@@ -25,7 +25,7 @@ All eight phases of the spec, at a scale that runs on a laptop.
 |---|---|
 | 1 Data + event taxonomy | 503 S&P names, 2.56M price rows, 237k events from 8-K item codes (1993–2026), plus 12.3k dividend events from the payment series |
 | 2 Features | 47 features: technical, sector-relative, event-derived (8-K and dividends), fundamentals, macro/regime |
-| 3 Models | 6 LightGBM models (direction + magnitude × 1/5/20d), purged walk-forward, per-regime validation, Optuna, XGBoost challenger, TreeSHAP, analog retrieval |
+| 3 Models | 9 LightGBM models (direction + magnitude + sector-relative direction × 1/5/20d), purged walk-forward, per-regime validation, Optuna, XGBoost challenger, TreeSHAP, analog retrieval |
 | 4 Sentiment | FinBERT over yfinance + EDGAR 8-K feeds, credibility/recency weighting, staleness flags, divergence detection |
 | 5 Fusion | Rules-based payload assembly; optional learned meta-model |
 | 6 Feedback | Prediction log, outcome resolution, rules-then-LLM post-mortem tagging, PSI drift, retrain cadence |
@@ -246,6 +246,36 @@ reasons to be treated as research-only: a four-feature volatility model beats
 ```bash
 python -m scripts.evaluate_vol_benchmarks --targets magnitude_1d   # ~3 min, ~1.1 GB
 ```
+
+### A target the model might actually be able to forecast
+
+Raw direction is dominated by what the market and the sector did that week,
+which is the part a stock-specific model has least hope of predicting — and the
+part that sank all three direction models in the 2022–23 rate-hike regime. So
+there is now a third target family, `rel_direction_{1,5,20}d`: the forward
+return **in excess of the stock's sector ETF**, scaled by the trailing
+volatility of that excess return. A stock down 3% on a day its sector fell 4%
+is strength here, not weakness.
+
+Nine targets in total. Rows without a usable sector series simply carry no
+label for this family rather than a wrong one. Whether the new target is any
+better is an open question until the rebuild trains it — the promotion gate
+decides, and the README will say either way.
+
+Two traps this touched:
+
+- The panel classifies a column as a label by prefix. `rel_forward_return_5d`
+  starts with neither `label_` nor `forward_`, so it would have been handed to
+  the model **as a feature** — a forward return as an input. `build_panel` now
+  refuses any feature column that looks forward-looking, and a test pins it.
+- A sector series with a few rows, forward-filled across the span, looked like
+  full coverage. Coverage is now counted in observations, not filled copies.
+
+There is also an **earnings-window diagnostic** in `ablations.json`: model skill
+split between rows where the company's own reporting clock says the next report
+is due inside the horizon, and rows where it is not. The clock (days since the
+last report) is knowable at prediction time; the actual next report date is not,
+which is why the split uses the former.
 
 ### Survivorship: historical membership, and what free data cannot fix
 

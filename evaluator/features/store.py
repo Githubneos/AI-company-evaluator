@@ -36,6 +36,8 @@ PANEL_PATH = STORE_DIR / "panel.parquet"
 META_PATH = STORE_DIR / "meta.json"
 
 ID_COLUMNS = ["ticker", "date"]
+#: Every column prefix that carries information from after the row's date.
+LABEL_PREFIXES = ("label_", "forward_", "rel_forward_")
 
 
 def recovered_tickers() -> list[str]:
@@ -155,7 +157,13 @@ def build_panel(
     panel["date"] = pd.to_datetime(panel["date"])
     panel = panel.sort_values(["date", "ticker"]).reset_index(drop=True)
 
-    label_names = [c for c in panel.columns if c.startswith(("label_", "forward_"))]
+    # Anything forward-looking is a label, never a feature. A new label column
+    # whose name escapes this prefix list would be handed to the model as an
+    # input -- the one mistake in this file that cannot be caught downstream.
+    label_names = [c for c in panel.columns if c.startswith(LABEL_PREFIXES)]
+    leaked = [c for c in feature_names if c.startswith(LABEL_PREFIXES) or "forward" in c]
+    if leaked:
+        raise RuntimeError(f"forward-looking columns in the feature set: {leaked}")
     schema = schema_hash(feature_names)
 
     atomic_write_parquet(panel, PANEL_PATH, index=False)

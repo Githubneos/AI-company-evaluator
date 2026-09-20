@@ -171,7 +171,9 @@ def build_payload(
             f"{scored['threshold_sigmas']:.1f} trailing sigma (about "
             f"{threshold_pct:.1f}%) over each modelled horizon. "
             "'direction' models predict drop/neutral/spike; 'magnitude' models "
-            "predict only whether a large move occurs, in either direction."
+            "predict only whether a large move occurs, in either direction; "
+            "'rel_direction' models predict the move relative to the stock's "
+            "sector ETF, with the sector's own move removed."
         ),
         "gbm": {"available": bool(targets), "targets": targets},
         "model_quality": _model_quality(targets),

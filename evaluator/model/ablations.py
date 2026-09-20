@@ -27,6 +27,7 @@ import logging
 from datetime import UTC, datetime
 
 import numpy as np
+import pandas as pd
 
 from evaluator.config import TargetSpec
 from evaluator.data.fundamentals import FUNDAMENTAL_FEATURES
@@ -36,6 +37,7 @@ from evaluator.metrics import brier_score
 from evaluator.model.baselines import (
     VOL_FEATURES,
     _incremental,
+    _load_model_artifacts,
     _skill,
     fit_feature_sets,
     paired_fold_stats,
@@ -132,6 +134,58 @@ def classify(stats: dict) -> str:
     return "no measurable effect"
 
 
+#: Typical calendar days between earnings reports. Used only to say whether the
+#: *next* report is expected inside the horizon -- which is knowable at t from
+#: the last report's date, unlike the actual date, which is not.
+EARNINGS_CYCLE_DAYS = 91
+#: Trading days are about 0.7 of calendar days.
+CALENDAR_PER_TRADING_DAY = 1.45
+
+
+def earnings_window_diagnostic(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainConfig) -> dict:
+    """Model skill where the next earnings report is expected inside the horizon.
+
+    Asking whether an actual report *fell* in the window would be a look-ahead.
+    What is knowable at t is the company's own clock: days since the last
+    report. Rows where the next one is due before the horizon closes are the
+    interesting ones, and this splits the model's own out-of-fold predictions
+    between them and everything else.
+    """
+    from evaluator.model.vol_benchmarks import replay_rows
+
+    feature = "days_since_earnings_result"
+    if feature not in panel.feature_names:
+        return {"available": False, "reason": f"{feature} is not in the panel"}
+
+    meta, saved = _load_model_artifacts(spec)
+    rows = replay_rows(panel, spec, cfg, int(meta.get("date_stride", 1)))
+    order = np.concatenate([test for _, test in rows.folds])
+    y, proba = rows.y[order].astype(int), np.asarray(saved["probabilities"], dtype=float)
+    if len(y) != len(proba) or not np.array_equal(y, saved["y"]):
+        return {"available": False, "reason": "out-of-fold rows do not match the saved model"}
+
+    values = (
+        panel.frame.set_index(["ticker", "date"])[feature]
+        .reindex(pd.MultiIndex.from_arrays([rows.tickers[order], pd.DatetimeIndex(rows.dates.iloc[order])]))
+        .to_numpy(dtype=float)
+    )
+    horizon_days = spec.horizon_days * CALENDAR_PER_TRADING_DAY
+    # Next report due before the horizon closes, and the last one actually happened.
+    due = (values < 5000) & (values + horizon_days >= EARNINGS_CYCLE_DAYS)
+
+    priors = np.vstack(
+        [np.tile(np.bincount(rows.y[tr].astype(int), minlength=spec.n_classes) / len(tr), (len(te), 1))
+         for tr, te in rows.folds]
+    )
+    out = {"available": True, "cycle_days": EARNINGS_CYCLE_DAYS, "n_rows": int(len(y))}
+    for name, mask in (("earnings_expected", due), ("quiet_period", ~due)):
+        if mask.sum() < MIN_REGIME_ROWS or len(np.unique(y[mask])) < 2:
+            out[name] = {"n": int(mask.sum()), "skill": None}
+            continue
+        out[name] = {"n": int(mask.sum()), "share": float(mask.mean()), **_skill(y[mask], proba[mask], priors[mask])}
+    return out
+
+
 def evaluate_ablations(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainConfig) -> dict:
     """Fit every ablation set on the model's folds, compare with `vol`. Writes ablations.json."""
     sets = ablation_sets(panel.feature_names)
@@ -187,6 +241,7 @@ def evaluate_ablations(panel: FeaturePanel, spec: TargetSpec, cfg: PanelTrainCon
         "group_labels": GROUP_LABELS,
         "sets": results,
         "model": model,
+        "earnings_window": earnings_window_diagnostic(panel, spec, cfg),
         "groups_that_earn_their_place": earns,
         "recommended_features": recommended,
     }

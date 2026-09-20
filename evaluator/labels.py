@@ -67,6 +67,54 @@ def make_labels(prices: pd.DataFrame, cfg: LabelConfig) -> pd.DataFrame:
     )
 
 
+def make_relative_labels(
+    prices: pd.DataFrame, sector: pd.DataFrame | None, cfg: LabelConfig
+) -> pd.DataFrame:
+    """Forward return *in excess of the stock's sector*, volatility-scaled.
+
+    Same shape as `make_labels`, but both the move and the yardstick are
+    sector-relative: the excess return over the sector ETF, divided by the
+    trailing volatility of that excess return. A stock down 3% on a day its
+    sector fell 4% is strength here, not weakness.
+
+    Without a sector series there is nothing to be relative to, so the labels
+    are NaN and those rows simply do not train this target.
+    """
+    close = prices["close"]
+    empty = pd.DataFrame(
+        {"forward_return": np.nan, "forward_z": np.nan, "label_rel_direction": np.nan},
+        index=close.index,
+    )
+    if sector is None or sector.empty:
+        return empty
+
+    aligned = sector["close"].reindex(close.index)
+    # Count *observations*, not forward-filled copies of them: a handful of
+    # sector rows padded across the span would look like full coverage and
+    # produce labels measured against a frozen sector.
+    if aligned.notna().sum() < cfg.vol_lookback:
+        return empty
+    sector_close = aligned.ffill()
+
+    excess = close.pct_change() - sector_close.pct_change()
+    forward_excess = (
+        close.shift(-cfg.horizon_days) / close - sector_close.shift(-cfg.horizon_days) / sector_close
+    )
+    scale = realized_vol(excess, cfg.vol_lookback) * np.sqrt(cfg.horizon_days)
+    z = forward_excess / (scale + EPS)
+
+    known = z.notna()
+    label = pd.Series(np.nan, index=close.index, dtype="float64")
+    label[known & (z >= cfg.threshold_sigmas)] = SPIKE
+    label[known & (z <= -cfg.threshold_sigmas)] = DROP
+    label[known & (z.abs() < cfg.threshold_sigmas)] = NEUTRAL
+
+    return pd.DataFrame(
+        {"forward_return": forward_excess, "forward_z": z, "label_rel_direction": label},
+        index=close.index,
+    )
+
+
 def make_labels_for(prices: pd.DataFrame, targets) -> dict[str, pd.DataFrame]:
     """Label frames keyed by `TargetSpec.name`, one per model to be trained."""
     return {spec.name: make_labels(prices, spec.label_config()) for spec in targets}

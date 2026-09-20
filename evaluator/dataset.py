@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from evaluator.config import LabelConfig, TargetSpec, default_targets
+from evaluator.config import REL_DIRECTION, LabelConfig, TargetSpec, default_targets
 from evaluator.data.dividends import dividend_events, load_dividends
 from evaluator.data.edgar import EdgarClient
 from evaluator.data.fundamentals import join_as_of, load_fundamentals
@@ -22,7 +22,7 @@ from evaluator.data.sources import load_benchmark, load_macro, load_prices
 from evaluator.data.universe import cik_for, sector_map
 from evaluator.events import build_event_table
 from evaluator.features.build import build_features
-from evaluator.labels import make_labels
+from evaluator.labels import make_labels, make_relative_labels
 
 log = logging.getLogger(__name__)
 
@@ -130,8 +130,9 @@ def build_dataset(
                 log.warning("fundamentals unavailable for %s: %s", ticker, exc)
 
     # One label frame per horizon; columns are namespaced by target name so a
-    # single row carries every target the six models need.
+    # single row carries every target the models need.
     targets = targets or default_targets()
+    kinds = {t.kind for t in targets}
     label_frames = {}
     for horizon in sorted({t.horizon_days for t in targets}):
         cfg = LabelConfig(
@@ -144,6 +145,12 @@ def build_dataset(
         # would store the same column twice per horizon.
         for column in frame.columns.drop("label"):
             label_frames[f"{column}_{horizon}d"] = frame[column]
+
+        if REL_DIRECTION in kinds:
+            relative = make_relative_labels(prices, sector_prices, cfg)
+            label_frames[f"label_rel_direction_{horizon}d"] = relative["label_rel_direction"]
+            label_frames[f"rel_forward_return_{horizon}d"] = relative["forward_return"]
+            label_frames[f"rel_forward_z_{horizon}d"] = relative["forward_z"]
 
     labels = pd.DataFrame(label_frames, index=prices.index)
     labels["label"] = labels.get(f"label_direction_{label_cfg.horizon_days}d")

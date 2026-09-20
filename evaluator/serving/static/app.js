@@ -44,20 +44,26 @@
 
   const toneOf = (x, eps = 0) => (!isNum(x) ? "" : x > eps ? "pos" : x < -eps ? "neg" : "");
 
-  const TARGETS = ["magnitude_1d", "magnitude_5d", "magnitude_20d", "direction_1d", "direction_5d", "direction_20d"];
+  const TARGETS = [
+    "magnitude_1d", "magnitude_5d", "magnitude_20d",
+    "direction_1d", "direction_5d", "direction_20d",
+    "rel_direction_1d", "rel_direction_5d", "rel_direction_20d",
+  ];
   const HORIZONS = [1, 5, 20];
   const REGIMES = [
     ["pre_gfc", "Pre-GFC"], ["gfc", "GFC"], ["recovery", "Recovery"], ["covid_crash", "COVID crash"],
     ["covid_recovery", "COVID recovery"], ["rate_hikes", "Rate hikes"], ["recent", "Recent"],
   ];
   const regimeName = (k) => (REGIMES.find(([key]) => key === k) || [k, k])[1];
+  const KIND_LABELS = { magnitude: "Magnitude", direction: "Direction", rel_direction: "Sector-relative" };
   const targetParts = (t) => {
-    const [kind, h] = t.split("_");
-    return { kind, h: parseInt(h, 10) };
+    // "rel_direction_5d" -> kind "rel_direction": the kind is everything but the horizon.
+    const parts = t.split("_");
+    return { kind: parts.slice(0, -1).join("_"), h: parseInt(parts[parts.length - 1], 10) };
   };
   const targetLabel = (t) => {
     const { kind, h } = targetParts(t);
-    return `${kind[0].toUpperCase()}${kind.slice(1)} · ${h}d`;
+    return `${KIND_LABELS[kind] || kind} · ${h}d`;
   };
 
   const ICON = {
@@ -125,6 +131,7 @@
     route: null,
     range: store.get("ace-range", 252),
     driverKind: "magnitude",
+    directionKind: "direction",
     driverH: 1,
     calibClass: "DROP",
     modelTarget: "magnitude_1d",
@@ -659,8 +666,10 @@
   }
 
   function directionCard(targets) {
+    const hasRelative = HORIZONS.some((h) => targets[`rel_direction_${h}d`]);
+    const kind = hasRelative && state.directionKind === "rel_direction" ? "rel_direction" : "direction";
     const rows = HORIZONS.map((h) => {
-      const t = targets[`direction_${h}d`];
+      const t = targets[`${kind}_${h}d`];
       if (!t) return "";
       const p = t.probabilities;
       const b = t.baseline_probabilities;
@@ -683,13 +692,18 @@
         </div>`;
     }).join("");
     return `
-      <section class="card span-5">
+      <section class="card span-5" id="direction-card">
         <div class="card-head">
           <div>
             <h2 class="card-title">${ICON.split} Direction</h2>
-            <p class="card-sub">Drop / neutral / spike. Ticks mark base rates.</p>
+            <p class="card-sub">${kind === "rel_direction"
+              ? "Move relative to the sector ETF, with the sector\u2019s own move removed."
+              : "Drop / neutral / spike. Ticks mark base rates."}</p>
           </div>
-          <span data-regime-warn="direction"></span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            ${hasRelative ? seg([["direction", "vs market"], ["rel_direction", "vs sector"]], kind, "data-dirkind", "Direction basis") : ""}
+            <span data-regime-warn="${kind}"></span>
+          </div>
         </div>
         ${rows || '<p class="muted small">No direction models trained.</p>'}
         <div class="legend" style="margin-top:12px">
@@ -918,6 +932,20 @@
         drawPriceChart(true);
       });
     }
+
+    // Direction basis: market or sector-relative. Delegated, so the listener
+    // survives re-rendering the card it lives in.
+    view.addEventListener("click", (e) => {
+      const button = e.target.closest("button[data-dirkind]");
+      if (!button || button.dataset.dirkind === state.directionKind) return;
+      state.directionKind = button.dataset.dirkind;
+      const card = $("#direction-card", view);
+      card.outerHTML = directionCard(targets);
+      const fresh = $("#direction-card", view);
+      animateIn(fresh, { stagger: false });
+      $$(".seg", fresh).forEach(syncSeg);
+      fillRegimeWarnings(view);
+    });
 
     // Drivers: kind + horizon segments, and the ring cards as shortcuts.
     const card = $("#drivers-card", view);

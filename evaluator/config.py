@@ -23,6 +23,11 @@ MAGNITUDE_NAMES = {QUIET: "QUIET", LARGE_MOVE: "LARGE_MOVE"}
 HORIZONS = (1, 5, 20)
 
 DIRECTION, MAGNITUDE = "direction", "magnitude"
+#: Direction of the move *relative to the stock's sector ETF*. Raw direction is
+#: dominated by whatever the market and the sector did that week, which is the
+#: part a stock-specific model has least hope of forecasting -- and the part
+#: that sank the direction models in the 2022-23 rate-hike regime.
+REL_DIRECTION = "rel_direction"
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,7 @@ class TargetSpec:
 
     @property
     def n_classes(self) -> int:
-        return 3 if self.kind == DIRECTION else 2
+        return 2 if self.kind == MAGNITUDE else 3
 
     @property
     def label_column(self) -> str:
@@ -69,7 +74,7 @@ class TargetSpec:
 
     @property
     def class_names(self) -> dict[int, str]:
-        return CLASS_NAMES if self.kind == DIRECTION else MAGNITUDE_NAMES
+        return MAGNITUDE_NAMES if self.kind == MAGNITUDE else CLASS_NAMES
 
     def label_config(self) -> LabelConfig:
         return LabelConfig(
@@ -80,10 +85,10 @@ class TargetSpec:
 
 
 def default_targets() -> list[TargetSpec]:
-    """Six models: {direction, magnitude} x {1, 5, 20} days."""
+    """Nine models: {direction, magnitude, rel_direction} x {1, 5, 20} days."""
     return [
         TargetSpec(horizon_days=h, kind=kind)
-        for kind in (DIRECTION, MAGNITUDE)
+        for kind in (DIRECTION, MAGNITUDE, REL_DIRECTION)
         for h in HORIZONS
     ]
 
