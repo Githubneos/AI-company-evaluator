@@ -87,6 +87,13 @@ def _poll_sentiment() -> dict:
     return {"scored": scored, "stale": stale}
 
 
+def _score_universe() -> dict:
+    from evaluator.scoring import score_universe
+
+    summary = score_universe()
+    return {k: v for k, v in summary.items() if k != "failures"} | {"failures": len(summary["failures"])}
+
+
 def _monitoring() -> dict:
     from evaluator.monitoring import system_report
 
@@ -96,6 +103,7 @@ def _monitoring() -> dict:
 JOBS: dict[str, Job] = {
     job.name: job
     for job in [
+        Job("score_universe", "daily", "Score every name from production models (7.3)", _score_universe),
         Job("resolve_outcomes", "daily", "Close out predictions whose window elapsed", _resolve_outcomes),
         Job("post_mortem", "weekly", "Tag why wrong predictions were wrong (6.2)", _post_mortem),
         Job("poll_sentiment", "every 15 min", "Refresh news sentiment cache (4.2)", _poll_sentiment),
@@ -107,6 +115,7 @@ JOBS: dict[str, Job] = {
 }
 
 CRON_LINES = {
+    "score_universe": "0 22 * * 1-5",
     "resolve_outcomes": "30 22 * * 1-5",
     "post_mortem": "0 3 * * 6",
     "poll_sentiment": "*/15 13-21 * * 1-5",

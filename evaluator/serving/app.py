@@ -26,6 +26,7 @@ from evaluator.llm.provider import LLMUnavailable
 from evaluator.model.predict import ModelNotTrained, available_targets, load_model, score_ticker
 from evaluator.model.registry import load_report
 from evaluator.monitoring import system_report
+from evaluator.scoring import DEFAULT_TARGET, leaderboard
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,21 @@ def universe() -> dict:
             "failed or were removed are absent, so downside frequencies are a floor."
         ),
     }
+
+
+@app.get("/leaderboard")
+def leaderboard_view(
+    target: str = DEFAULT_TARGET,
+    sector: str | None = None,
+    limit: int = Query(25, ge=1, le=500),
+    as_of: str | None = None,
+) -> dict:
+    """Highest-probability names from the last nightly scoring run.
+
+    Served from the stored table: this endpoint never scores on demand, which
+    is what keeps it fast and what makes the staleness flag meaningful.
+    """
+    return leaderboard(target, sector=sector, limit=limit, as_of=as_of)
 
 
 @app.get("/prices/{ticker}")

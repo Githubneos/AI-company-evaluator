@@ -135,6 +135,8 @@
     driverH: 1,
     calibClass: "DROP",
     modelTarget: "magnitude_1d",
+    boardTarget: store.get("ace-board-target", "magnitude_1d"),
+    boardSector: null,
     sentiment: new Map(),
     ticker: null,
   };
@@ -488,10 +490,27 @@
         </div>
         <p class="xs muted">Press <span class="kbd">/</span> to search from anywhere.</p>
       </section>
+      <div class="grid grid-12" id="board-host">
+        <section class="card span-12"><div class="skel skel-line" style="width:30%"></div>
+          <div class="skel" style="height:220px;margin-top:16px;border-radius:12px"></div></section>
+      </div>
       <section class="stats" id="home-stats">
         ${[0, 1, 2, 3].map(() => '<div class="stat"><div class="skel skel-line" style="width:60%"></div><div class="skel" style="height:28px;margin-top:10px;width:45%"></div></div>').join("")}
       </section>`;
     animateIn(view);
+
+    loadUniverse().then(() => loadBoard(view, token));
+    view.addEventListener("click", (e) => {
+      const target = e.target.closest("button[data-board]");
+      const sector = e.target.closest("button[data-sector]");
+      if (target) {
+        state.boardTarget = target.dataset.board;
+        store.set("ace-board-target", state.boardTarget);
+      } else if (sector) {
+        state.boardSector = sector.dataset.sector || null;
+      } else return;
+      loadBoard(view, token);
+    });
 
     const [u, v] = await Promise.all([loadUniverse(), loadValidation()]);
     if (stale(token)) return;
@@ -504,6 +523,72 @@
       <div class="stat"><span class="eyebrow">Best Brier skill</span>${num(best ? best[1] : null, "s4", best ? toneOf(best[1]) : "")}<span class="xs muted">${best ? esc(targetLabel(best[0])) + " vs base rate" : "no models loaded"}</span></div>
       <div class="stat"><span class="eyebrow">Walk-forward folds</span>${num(folds, "int")}<span class="xs muted">purged, out of sample</span></div>`;
     animateIn(el);
+  }
+
+  function leaderboardCard(board) {
+    if (!board || !board.available) {
+      return `<section class="card span-12"><div class="card-head"><div><h2 class="card-title">${ICON.trend} Highest risk today</h2>
+        <p class="card-sub">${esc((board && board.reason) || "No scored universe yet.")} Runs nightly after the close.</p></div></div></section>`;
+    }
+    const rows = board.rows || [];
+    const max = Math.max(...rows.map((r) => r.probability || 0), 0.01);
+    // Canonical order (magnitude, direction, sector-relative), not the API's.
+    const targets = TARGETS.filter((t) => (board.targets || []).includes(t));
+    const sectors = board.sectors || [];
+    return `
+      <section class="card span-12" id="leaderboard">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">${ICON.trend} Highest risk today</h2>
+            <p class="card-sub">Scored ${esc(board.as_of)} from the promoted models \u00b7 ${board.tickers_scored || 0} names${board.failures ? ` \u00b7 ${board.failures} failed` : ""}.
+              Ranked by probability of the flagged class; the base rate is what it has to beat.</p>
+          </div>
+          ${targets.length ? seg(targets.map((t) => [t, targetLabel(t)]), board.target, "data-board", "Leaderboard target") : ""}
+        </div>
+        ${board.stale ? `<div class="verdict bad" style="margin-bottom:14px">${ICON.alert}
+          <div><strong>These scores are ${board.stale_trading_days} trading days old</strong>
+          <span class="muted">Run <code class="mono">python -m scripts.score_universe</code>, or let the nightly job catch up.</span></div></div>` : ""}
+        <div class="chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          <button type="button" class="chip ${board.sector ? "" : "chip-accent"}" data-sector="">All sectors</button>
+          ${sectors.map((x) => `<button type="button" class="chip ${board.sector === x ? "chip-accent" : ""}" data-sector="${esc(x)}">${esc(x)}</button>`).join("")}
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Company</th><th>Sector</th><th>Probability</th><th class="r">vs base</th><th class="r">Close</th></tr></thead>
+          <tbody>${rows.map((r, i) => `
+            <tr style="--i:${i}">
+              <td class="mono xs muted">${i + 1}</td>
+              <td><a class="mono" href="#/t/${esc(r.ticker)}">${esc(r.ticker)}</a> <span class="xs muted">${esc((state.byTicker.get(r.ticker) || {}).name || "")}</span></td>
+              <td class="xs muted">${esc(r.sector || "\u2014")}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="sim-bar" style="width:120px;height:7px"><i style="width:${(((r.probability || 0) / max) * 100).toFixed(0)}%;background:var(--large)"></i></span>
+                  <span class="mono small">${fmt(r.probability, "pct1")}</span>
+                  <span class="xs muted">base ${fmt(r.baseline, "pct0")}</span>
+                </div>
+              </td>
+              <td class="r"><span class="chip ${r.lift >= 1.15 ? "chip-warn" : r.lift <= 0.87 ? "chip-pos" : ""}">${fmt(r.lift, "lift")}</span></td>
+              <td class="r mono small">${fmt(r.last_close, "money")}</td>
+            </tr>`).join("")}</tbody>
+        </table></div>
+        ${rows.length ? "" : '<p class="muted small">No rows for this filter.</p>'}
+      </section>`;
+  }
+
+  async function loadBoard(view, token) {
+    const host = $("#board-host", view);
+    if (!host) return;
+    const params = new URLSearchParams({ target: state.boardTarget, limit: "15" });
+    if (state.boardSector) params.set("sector", state.boardSector);
+    try {
+      const board = await api(`/leaderboard?${params}`, { signal: state.controller.signal, quiet: true });
+      if (stale(token)) return;
+      host.innerHTML = leaderboardCard(board);
+      animateIn(host, { stagger: false });
+      $$(".seg", host).forEach(syncSeg);
+    } catch (err) {
+      if (err.name === "AbortError" || stale(token)) return;
+      host.innerHTML = leaderboardCard(null);
+    }
   }
 
   // ------------------------------------------------------------------ ticker
