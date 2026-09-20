@@ -396,6 +396,46 @@ initiates at its 2013 spin-off.
 New features: `days_since_dividend_cut`, `days_since_dividend_raise` and
 `dividend_cuts_365d`. They reach the models at the next panel rebuild.
 
+### What the rebuilt models are actually worth
+
+Every candidate was re-run through all three analyses on its own out-of-sample
+rows. The pattern is consistent, and it is not flattering to the original six:
+
+| target | model | best simple baseline | best volatility benchmark | verdict vs baseline |
+|---|---|---|---|---|
+| magnitude_1d | +0.0397 | +0.0386 | +0.0356 | indistinguishable (9/17 folds) |
+| magnitude_5d | +0.0363 | **+0.0383** | +0.0246 | **worse** (5/17) |
+| magnitude_20d | +0.0375 | +0.0329 | +0.0222 | indistinguishable (8/17) |
+| direction_1d | +0.0209 | **+0.0257** | +0.0245 | **worse** (6/17) |
+| direction_5d | +0.0176 | **+0.0221** | +0.0170 | **worse** (7/17) |
+| direction_20d | +0.0218 | +0.0194 | +0.0150 | indistinguishable (8/17) |
+| **rel_direction_1d** | +0.0235 | +0.0190 | +0.0177 | **adds skill** (15/17, CI +0.0018..+0.0070) |
+| **rel_direction_5d** | +0.0282 | +0.0259 | +0.0092 | **adds skill** (13/17, CI +0.0005..+0.0042) |
+| **rel_direction_20d** | +0.0267 | +0.0250 | +0.0079 | **adds skill** (14/17, CI +0.0007..+0.0029) |
+
+**Only the sector-relative models beat simple baselines at all.** Every
+magnitude and direction model is either indistinguishable from a small model on
+volatility and earnings timing, or worse than one. The new target is the only
+part of this system that earns its complexity.
+
+**These are largely earnings-timing models.** The earnings-window diagnostic
+splits each model's own out-of-fold rows by whether the company's reporting
+clock says the next report falls inside the horizon:
+
+| target | next report due in window | quiet period |
+|---|---|---|
+| magnitude_1d | **+0.1290** | +0.0349 |
+| magnitude_5d | **+0.1176** | +0.0265 |
+| rel_direction_5d | **+0.1153** | +0.0140 |
+| direction_1d | **+0.0620** | +0.0185 |
+
+Skill is three to seven times higher when a report is due. That is knowable at
+prediction time (days since the last report), so it is usable — and it says
+plainly what these models mostly know: when a company is about to report.
+
+After promotion, production holds the three sector-relative models, the
+rebuilt `direction_1d`, and the five originals the gate refused to replace.
+
 ### Live track record
 
 Everything above is a backtest: a claim about the past, made by the people who
