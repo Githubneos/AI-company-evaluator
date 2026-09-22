@@ -180,7 +180,9 @@ def tickers(limit: int | None = None) -> list[str]:
 
 def cik_for(ticker: str) -> int | None:
     df = load_universe()
-    row = df.loc[df["ticker"] == ticker, "cik"]
+    # The universe is upper-case; a caller passing "aapl" should not get "no CIK"
+    # and silently lose its filings and news.
+    row = df.loc[df["ticker"] == ticker.strip().upper(), "cik"]
     return None if row.empty or pd.isna(row.iloc[0]) else int(row.iloc[0])
 
 
