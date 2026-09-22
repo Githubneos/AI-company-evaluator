@@ -44,6 +44,7 @@ from evaluator.config import (
 log = logging.getLogger(__name__)
 
 DB_PATH = Path(ARTIFACT_DIR) / "predictions.db"
+BUSY_TIMEOUT_SECONDS = 30.0
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS predictions (
@@ -90,9 +91,14 @@ def connect(db_path: Path | str | None = None):
     # test (or a second database) could not redirect it.
     path = Path(db_path if db_path is not None else DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # The API and the nightly scoring job both write here. Under SQLite's default
+    # rollback journal a writer blocks readers and a second writer fails at once
+    # with "database is locked"; WAL lets readers proceed during a write, and the
+    # busy timeout makes a second writer wait its turn instead of failing.
+    conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
         _migrate(conn)
         conn.executescript(INDEXES)

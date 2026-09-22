@@ -98,3 +98,17 @@ def test_resolution_is_idempotent(db, prices):
 
     assert resolve_pending(prices_by_ticker={"TEST": prices}, db_path=db) == 1
     assert resolve_pending(prices_by_ticker={"TEST": prices}, db_path=db) == 0
+
+
+def test_the_prediction_log_uses_wal_so_readers_do_not_block_on_a_writer(tmp_path):
+    from evaluator.feedback.store import connect
+
+    path = tmp_path / "log.db"
+    with connect(path) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+    # Mid-write, a second connection can still read the committed rows.
+    with connect(path) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        with connect(path) as reader:
+            assert reader.execute("SELECT COUNT(*) FROM predictions").fetchone()[0] == 0
