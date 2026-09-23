@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 import evaluator.fusion as fusion
+import evaluator.regimes as regimes
 from evaluator.regimes import ANALOGOUS_REGIMES, current_regimes, volatility_state
 
 
@@ -39,6 +40,14 @@ def _metadata(by_regime: dict) -> dict:
     return {"validation": {"by_regime": {k: {"brier_skill": v} for k, v in by_regime.items()}}}
 
 
+@pytest.fixture(autouse=True)
+def _no_vix_cache():
+    """The live VIX is memoised per day; tests set their own."""
+    regimes._vix_on.cache_clear()
+    yield
+    regimes._vix_on.cache_clear()
+
+
 @pytest.fixture
 def measured(monkeypatch):
     """Two models: one that held up in stressed markets, one that did not."""
@@ -51,7 +60,7 @@ def measured(monkeypatch):
 
 
 def test_a_model_that_lost_in_similar_conditions_is_flagged(measured, monkeypatch):
-    monkeypatch.setattr("evaluator.regimes.current_vix", lambda: 26.0)  # stressed, like 2022-23
+    monkeypatch.setattr(regimes, "current_vix", lambda: 26.0)  # stressed, like 2022-23
 
     guard = fusion._regime_guard({"magnitude_1d": {}, "direction_5d": {}})
 
@@ -65,7 +74,7 @@ def test_a_model_that_lost_in_similar_conditions_is_flagged(measured, monkeypatc
 
 
 def test_the_same_model_is_fine_when_the_market_is_calm(measured, monkeypatch):
-    monkeypatch.setattr("evaluator.regimes.current_vix", lambda: 13.0)
+    monkeypatch.setattr(regimes, "current_vix", lambda: 13.0)
 
     guard = fusion._regime_guard({"direction_5d": {}})
 
@@ -76,7 +85,7 @@ def test_the_same_model_is_fine_when_the_market_is_calm(measured, monkeypatch):
 
 def test_a_model_without_a_record_for_todays_regimes_says_so(monkeypatch):
     monkeypatch.setattr("evaluator.model.registry.load_metadata", lambda t, *a, **k: _metadata({"gfc": 0.05}))
-    monkeypatch.setattr("evaluator.regimes.current_vix", lambda: 13.0)
+    monkeypatch.setattr(regimes, "current_vix", lambda: 13.0)
 
     guard = fusion._regime_guard({"magnitude_1d": {}})
     entry = guard["per_target"]["magnitude_1d"]
@@ -91,3 +100,47 @@ def test_the_llm_is_told_to_defer_to_the_guard():
 
     assert "regime_guard.unreliable_now" in SYSTEM_PROMPT
     assert "unusable right now" in SYSTEM_PROMPT
+
+
+def test_the_guard_never_reaches_the_network_and_survives_a_dead_feed(monkeypatch, measured):
+    """A provider stall must not hang a request: the guard degrades instead."""
+    calls = []
+
+    def refuse(*args, refresh=True, **kwargs):
+        calls.append(refresh)
+        raise RuntimeError("provider is down")
+
+    monkeypatch.setattr("evaluator.data.sources.load_prices", refuse)
+
+    guard = fusion._regime_guard({"direction_5d": {}})
+
+    assert calls and not any(calls), "the guard asked the network to refresh"
+    assert guard["state"] == "unknown"
+    assert guard["relevant"] == [guard["calendar"]]
+    assert guard["unreliable_now"] == []  # unmeasured is not the same as failed
+
+
+def test_the_open_ended_final_regime_says_that_it_is_one():
+    context = current_regimes(13.0, today=pd.Timestamp("2026-09-19"))
+
+    assert context["calendar"] == "recent"
+    assert context["calendar_open_ended"] is True
+    assert "open-ended" in context["calendar_note"]
+
+
+def test_a_dated_regime_carries_no_open_ended_note():
+    assert "calendar_note" not in current_regimes(13.0, today=pd.Timestamp("2022-06-01"))
+
+
+def test_the_leaderboard_and_the_payload_agree_on_what_unusable_means(measured, monkeypatch):
+    """One implementation, so the two surfaces cannot drift apart."""
+    import evaluator.scoring as scoring
+
+    monkeypatch.setattr(regimes, "current_vix", lambda: 26.0)
+
+    payload = fusion._regime_guard({"direction_5d": {}})
+    board = scoring._target_guard("direction_5d")
+
+    assert board["reliable_now"] is payload["per_target"]["direction_5d"]["reliable_now"] is False
+    assert board["worst_regime"] == payload["per_target"]["direction_5d"]["worst_regime"]
+    assert board["worst_skill"] == payload["per_target"]["direction_5d"]["worst_skill"]

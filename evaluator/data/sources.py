@@ -50,13 +50,23 @@ def load_prices(
     end: str | None = None,
     *,
     use_cache: bool = True,
+    refresh: bool = True,
 ) -> pd.DataFrame:
     """Split/dividend-adjusted daily bars indexed by tz-naive date.
 
     Returns columns: open, high, low, close, volume.
+
+    `refresh=False` forbids the network entirely: the cache is returned as it
+    stands, however stale, and a miss raises rather than downloading. Callers
+    on a request path want this -- refreshing a live series inside a web
+    handler turns a provider stall into a hung page.
     """
     path = _cache_path(ticker, start, end)
     cached = _read_cache(path) if use_cache else None
+    if not refresh:
+        if cached is None:
+            raise ValueError(f"no cached price data for {ticker!r} ({start} -> {end}) and refresh is off")
+        return cached
     # Historical requests are immutable.  A request with no end date is a live
     # series, however: returning its first cached copy forever would silently
     # freeze serving features and every scheduled panel refresh.  Refresh only
@@ -117,7 +127,7 @@ def _write_cache(df: pd.DataFrame, path) -> None:
     atomic_write_parquet(df, path)
 
 
-def load_macro(start: str, end: str | None = None, *, use_cache: bool = True) -> pd.DataFrame:
+def load_macro(start: str, end: str | None = None, *, use_cache: bool = True, refresh: bool = True) -> pd.DataFrame:
     """VIX level and a yield-curve slope proxy, forward-filled onto trading days.
 
     ^TNX and ^IRX are quoted in percentage points, so their difference is the
@@ -132,7 +142,7 @@ def load_macro(start: str, end: str | None = None, *, use_cache: bool = True) ->
         ("y3m", YIELD_3M_TICKER),
     ):
         try:
-            frames[name] = load_prices(ticker, start, end, use_cache=use_cache)["close"]
+            frames[name] = load_prices(ticker, start, end, use_cache=use_cache, refresh=refresh)["close"]
         except Exception as exc:  # noqa: BLE001 - macro series are best-effort
             log.warning("macro series %s (%s) unavailable: %s", name, ticker, exc)
 

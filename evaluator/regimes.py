@@ -14,6 +14,7 @@ where accuracy matters -- so validation reports per regime, not just pooled.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -101,12 +102,18 @@ def volatility_state(vix: float | None) -> str:
     return "unknown"
 
 
-def current_vix() -> float | None:
-    """The latest VIX close from the local cache; None if unavailable."""
+@lru_cache(maxsize=4)
+def _vix_on(day: str) -> float | None:
+    """The latest cached VIX close. Cached per day, and never fetches.
+
+    This runs on a request path, so it reads what the nightly jobs already
+    wrote and nothing else. A stale or absent quote yields an `unknown` state,
+    which the guard handles; a yfinance stall inside a web handler does not.
+    """
     from evaluator.data.sources import load_macro
 
     try:
-        macro = load_macro("2015-01-01")
+        macro = load_macro("2015-01-01", refresh=False)
     except Exception as exc:  # noqa: BLE001 - the guard degrades, it does not fail
         log.warning("VIX unavailable for the regime guard: %s", exc)
         return None
@@ -114,6 +121,11 @@ def current_vix() -> float | None:
         return None
     series = macro["vix"].dropna()
     return float(series.iloc[-1]) if len(series) else None
+
+
+def current_vix() -> float | None:
+    """The latest VIX close from the local cache; None if unavailable."""
+    return _vix_on(str(pd.Timestamp.now().normalize().date()))
 
 
 def current_regimes(vix: float | None = None, today: pd.Timestamp | None = None) -> dict:
@@ -127,4 +139,73 @@ def current_regimes(vix: float | None = None, today: pd.Timestamp | None = None)
     calendar = str(regime_for(pd.DatetimeIndex([when])).iloc[0])
     state = volatility_state(vix)
     relevant = [calendar] + [r for r in ANALOGOUS_REGIMES.get(state, []) if r != calendar]
-    return {"as_of": str(when.date()), "vix": vix, "state": state, "calendar": calendar, "relevant": relevant}
+    context = {
+        "as_of": str(when.date()),
+        "vix": vix,
+        "state": state,
+        "calendar": calendar,
+        "relevant": relevant,
+    }
+
+    # The last regime has no real end date, so it absorbs every future date and
+    # slowly stops describing anything. Say so rather than let "recent" imply a
+    # market resembling the one the model was validated in.
+    end = next((pd.Timestamp(e) for name, _, e in REGIMES if name == calendar), None)
+    if end is not None and end.year >= 2100:
+        started = next(pd.Timestamp(s) for name, s, _ in REGIMES if name == calendar)
+        years = (when - started).days / 365.25
+        context["calendar_open_ended"] = True
+        context["calendar_note"] = (
+            f"{calendar!r} is an open-ended bucket, running {years:.1f} years since "
+            f"{started.date()}. It is where today falls in the validation split, not evidence "
+            "that this market resembles that one; the volatility state is the better guide."
+        )
+    return context
+
+
+def regime_guard(targets, *, vix: float | None = None, today=None, stage: str = "production") -> dict:
+    """Is each model trustworthy in *today's* market, on its own measured record?
+
+    A model that lost to the base rate the last time volatility looked like
+    this should not be presented as a signal now. The numbers come from the
+    model's own per-regime validation, so this adds no new claim: it just stops
+    an average hiding the regime we are actually in.
+    """
+    from evaluator.model.registry import load_metadata
+
+    context = current_regimes(current_vix() if vix is None else vix, today=today)
+    relevant = context["relevant"]
+    per_target, unreliable = {}, []
+
+    for name in targets:
+        by_regime = (load_metadata(name, stage) or {}).get("validation", {}).get("by_regime", {})
+        measured = {
+            regime: by_regime[regime]["brier_skill"]
+            for regime in relevant
+            if regime in by_regime and by_regime[regime].get("brier_skill") is not None
+        }
+        worst_regime = min(measured, key=measured.get) if measured else None
+        worst = measured.get(worst_regime)
+        reliable = worst is None or worst > 0
+        if not reliable:
+            unreliable.append(name)
+        per_target[name] = {
+            "measured": measured,
+            "worst_regime": worst_regime,
+            "worst_skill": worst,
+            "reliable_now": reliable,
+            "interpretation": (
+                f"No per-regime record for {', '.join(relevant)}; reliability today is unmeasured."
+                if worst is None
+                else (
+                    f"Measured skill {worst:+.4f} in {worst_regime}, the closest match to today's "
+                    f"{context['state']} market. This model has lost to the base rate in conditions "
+                    "like these: treat its output as no signal."
+                    if not reliable
+                    else f"Positive measured skill ({worst:+.4f}) in every regime resembling today's "
+                    f"{context['state']} market."
+                )
+            ),
+        }
+
+    return {**context, "per_target": per_target, "unreliable_now": sorted(unreliable)}

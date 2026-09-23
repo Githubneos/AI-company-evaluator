@@ -57,53 +57,14 @@ def _quality_verdict(skill: float | None, auc: float | None) -> str:
 
 
 def _regime_guard(targets: dict) -> dict:
-    """Is each model trustworthy in *today's* market, on its own measured record?
+    """Whether each model has a positive record in markets like today's.
 
-    A model that lost to the base rate the last time volatility looked like this
-    should not be presented as a signal now. The skill numbers come from the
-    model's own per-regime validation, so this adds no new claim: it just stops
-    an average hiding the regime we are actually in.
+    The logic lives in `evaluator.regimes` so the payload and the leaderboard
+    cannot drift apart on what "unusable now" means.
     """
-    from evaluator.model.registry import load_metadata
-    from evaluator.regimes import current_regimes, current_vix
+    from evaluator.regimes import regime_guard
 
-    context = current_regimes(current_vix())
-    relevant = context["relevant"]
-    per_target, unreliable = {}, []
-
-    for name in targets:
-        metadata = load_metadata(name)
-        by_regime = (metadata or {}).get("validation", {}).get("by_regime", {})
-        measured = {
-            regime: by_regime[regime]["brier_skill"]
-            for regime in relevant
-            if regime in by_regime and by_regime[regime].get("brier_skill") is not None
-        }
-        worst_regime = min(measured, key=measured.get) if measured else None
-        worst = measured.get(worst_regime)
-        reliable = worst is None or worst > 0
-        if not reliable:
-            unreliable.append(name)
-        per_target[name] = {
-            "measured": measured,
-            "worst_regime": worst_regime,
-            "worst_skill": worst,
-            "reliable_now": reliable,
-            "interpretation": (
-                f"No per-regime record for {', '.join(relevant)}; reliability today is unmeasured."
-                if worst is None
-                else (
-                    f"Measured skill {worst:+.4f} in {worst_regime}, the closest match to today's "
-                    f"{context['state']} market. This model has lost to the base rate in conditions "
-                    "like these: treat its output as no signal."
-                    if not reliable
-                    else f"Positive measured skill ({worst:+.4f}) in every regime resembling today's "
-                    f"{context['state']} market."
-                )
-            ),
-        }
-
-    return {**context, "per_target": per_target, "unreliable_now": sorted(unreliable)}
+    return regime_guard(list(targets))
 
 
 def _model_quality(targets: dict) -> dict:
