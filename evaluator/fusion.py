@@ -69,15 +69,25 @@ def _regime_guard(targets: dict) -> dict:
 
 def _model_quality(targets: dict) -> dict:
     """Per-target skill plus an overall verdict driven by the best model."""
+    from evaluator.model.registry import load_report
+
     per_target = {}
     best_skill, best_name, best_auc = None, None, None
+    not_deployable = []
 
     for name, result in targets.items():
         skill = result["skill"].get("brier_skill")
+        verdict = load_report(name, "deployability") or {}
+        deployable = verdict.get("deployable", True)
         per_target[name] = {
             **result["skill"],
             "interpretation": _quality_verdict(skill, result["skill"].get("macro_auc")),
+            "deployable": deployable,
+            "deployability_reason": verdict.get("reason"),
         }
+        if not deployable:
+            not_deployable.append(name)
+            continue  # a model something simpler beats does not get to be the headline
         if skill is not None and (best_skill is None or skill > best_skill):
             best_skill, best_name, best_auc = skill, name, result["skill"].get("macro_auc")
 
@@ -87,6 +97,9 @@ def _model_quality(targets: dict) -> dict:
         "best_brier_skill": best_skill,
         "interpretation": _quality_verdict(best_skill, best_auc),
         "any_target_has_skill": bool(best_skill is not None and best_skill > SKILL_NOISE_FLOOR),
+        # Beaten by something simpler on its own out-of-fold rows: research
+        # output, whatever today's market happens to be doing.
+        "not_deployable": sorted(not_deployable),
     }
 
 

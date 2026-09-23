@@ -38,6 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from evaluator.io import atomic_write_json
 from evaluator.metrics import brier_score
 from evaluator.model.registry import (
     CANDIDATE,
@@ -291,10 +292,26 @@ def promote(target: str, *, apply: bool = False) -> dict:
     verdict = compare(candidate, incumbent, common)
     verdict["target"] = target
 
+    # Decided on the candidate, so the verdict travels with the model it
+    # describes rather than being recomputed per request from whatever reports
+    # happen to be present.
+    verdict["deployability"] = _write_deployability(target)
+
     if verdict["promote"] and apply:
         swap_into_production(target)
         verdict["applied"] = True
     return verdict
+
+
+def _write_deployability(target: str) -> dict:
+    """Record, beside the candidate, whether anything simpler beats it."""
+    from evaluator.model.deployability import assess
+
+    report = assess(target, CANDIDATE)
+    path = model_dir(target, CANDIDATE) / "deployability.json"
+    if path.parent.exists():
+        atomic_write_json(report, path)
+    return report
 
 
 __all__ = ["common_row_comparison", "compare", "promote", "retire", "swap_into_production"]

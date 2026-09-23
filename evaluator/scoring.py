@@ -192,9 +192,13 @@ def leaderboard(
         subset = subset[subset["sector"] == sector]
     subset = subset.sort_values("probability", ascending=False).head(max(1, min(limit, 500)))
 
+    from evaluator.model.deployability import assess
+
     stale_by = _trading_days_since(summary["as_of"])
     return {
         "regime_guard": _target_guard(target),
+        # Ranking 500 names by a model something simpler beats sorts noise.
+        "deployability": assess(target),
         "available": True,
         "as_of": summary["as_of"],
         "computed_at": summary.get("computed_at"),

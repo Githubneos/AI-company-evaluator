@@ -642,6 +642,9 @@
           <span class="muted">Measured skill ${signed(board.regime_guard.worst_skill, 4)} in ${esc(board.regime_guard.worst_regime)},
             the closest match to today\u2019s ${esc(board.regime_guard.state)} tape (VIX ${fmt(board.regime_guard.vix, "f2")}).
             Ranking by it would present noise as risk.</span></div></div>` : ""}
+        ${board.deployability && board.deployability.deployable === false ? `<div class="verdict bad" style="margin-bottom:14px">${ICON.alert}
+          <div><strong>${esc(targetLabel(board.target))} is beaten by something simpler</strong>
+          <span class="muted">${esc(board.deployability.reason)}</span></div></div>` : ""}
         ${board.stale ? `<div class="verdict bad" style="margin-bottom:14px">${ICON.alert}
           <div><strong>These scores are ${board.stale_trading_days} trading days old</strong>
           <span class="muted">Run <code class="mono">python -m scripts.score_universe</code>, or let the nightly job catch up.</span></div></div>` : ""}
@@ -737,6 +740,7 @@
       ${verdictBanner(payload.model_quality)}
       <div class="grid grid-12">
         ${regimeGuardBand(payload.regime_guard)}
+        ${deployabilityBand(payload.model_quality)}
         ${riskCard(payload, targets)}
         ${directionCard(targets)}
         ${driversCard(targets)}
@@ -795,6 +799,23 @@
           <strong>${good ? `Best model: ${esc(targetLabel(q.best_target || ""))}` : "No model beats the base rate"}</strong>
           <span class="muted">${esc(q.interpretation || "")}</span>
           ${good ? "" : '<div class="small" style="margin-top:6px">These outputs must not be read as a signal.</div>'}
+        </div>
+      </section>`;
+  }
+
+  /** Models a simpler alternative already beats, in every market. */
+  function deployabilityBand(quality) {
+    const beaten = (quality || {}).not_deployable || [];
+    if (!beaten.length) return "";
+    const reason = (quality.per_target[beaten[0]] || {}).deployability_reason || "";
+    return `
+      <section class="verdict bad span-12" role="note">
+        ${ICON.alert}
+        <div>
+          <strong>Research only: ${esc(beaten.map(targetLabel).join(", "))}</strong>
+          <span class="muted">${esc(reason)}</span>
+          <div class="xs muted" style="margin-top:6px">Measured on this model\u2019s own out-of-sample rows,
+            so it holds in every market \u2014 not just today\u2019s.</div>
         </div>
       </section>`;
   }
