@@ -81,6 +81,7 @@ def _rows(result: dict, sector: str | None) -> tuple[list[dict], list[dict]]:
                 "last_close": result.get("last_close"),
                 "probabilities": probabilities,
                 "predicted_class": scored["predicted_class"],
+                "model_fingerprint": scored.get("model_fingerprint"),
             }
         )
     return rows, predictions

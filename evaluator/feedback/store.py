@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     proba_neutral     REAL,
     proba_spike       REAL,
     predicted_class   TEXT NOT NULL,
+    model_fingerprint TEXT,
     sentiment_score   REAL,
     top_features      TEXT,
     resolved_at       TEXT,
@@ -113,7 +114,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # Rebuild when a column is missing *or* when the old NOT NULL constraints
     # are still there: a magnitude prediction has no DROP probability to store,
     # and a half-migrated database fails only at the first insert.
-    required = {"target", "kind", "probabilities"}
+    required = {"target", "kind", "probabilities", "model_fingerprint"}
     constrained = any(info[c][3] for c in ("proba_drop", "proba_neutral", "proba_spike") if c in info)
     if required <= set(info) and not constrained:
         return
@@ -129,6 +130,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         target_expr = f"COALESCE(NULLIF(target, ''), {target_expr})"
     if "kind" in info:
         kind_expr = f"COALESCE(NULLIF(kind, ''), {kind_expr})"
+    # Rows predating the column cannot be attributed to a model: NULL says so,
+    # which is the honest answer and what live_skill reports them as.
+    fingerprint_expr = "model_fingerprint" if "model_fingerprint" in info else "NULL"
     if "probabilities" in info:
         probabilities_expr = (
             f"CASE WHEN probabilities IS NULL OR probabilities IN ('', '{{}}') "
@@ -143,6 +147,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             prediction_id, ticker, created_at, as_of, target, kind, horizon_days,
             threshold_sigmas, label_scale, last_close, probabilities,
             proba_drop, proba_neutral, proba_spike, predicted_class,
+            model_fingerprint,
             sentiment_score, top_features, resolved_at, actual_return, actual_z,
             actual_class, error_type, post_mortem_tag
         )
@@ -151,6 +156,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             {target_expr}, {kind_expr}, horizon_days,
             threshold_sigmas, label_scale, last_close, {probabilities_expr},
             proba_drop, proba_neutral, proba_spike, predicted_class,
+            {fingerprint_expr},
             sentiment_score, top_features, resolved_at, actual_return, actual_z,
             actual_class, error_type, post_mortem_tag
           FROM predictions
@@ -188,8 +194,8 @@ def _insert(conn: sqlite3.Connection, score: dict) -> str:
             prediction_id, ticker, created_at, as_of, target, kind, horizon_days,
             threshold_sigmas, label_scale, last_close, probabilities,
             proba_drop, proba_neutral, proba_spike, predicted_class,
-            sentiment_score, top_features
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_fingerprint, sentiment_score, top_features
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             prediction_id,
@@ -209,6 +215,7 @@ def _insert(conn: sqlite3.Connection, score: dict) -> str:
             probabilities.get(CLASS_NAMES[NEUTRAL]),
             probabilities.get(CLASS_NAMES[SPIKE]),
             score["predicted_class"],
+            score.get("model_fingerprint"),
             score.get("sentiment_score"),
             json.dumps(score.get("top_features", [])),
         ),
@@ -344,6 +351,20 @@ def _mean_brier(records: list[dict], classes: list[str], forecasts: list[dict]) 
 MIN_LIVE_ROWS = 200
 
 
+def _skill_of(records: list[dict], classes: list[str]) -> dict:
+    """Brier skill for one model's resolved predictions, on its own base rates."""
+    priors = {c: sum(r["actual_class"] == c for r in records) / len(records) for c in classes}
+    model = _mean_brier(records, classes, [json.loads(r["probabilities"]) for r in records])
+    baseline = _mean_brier(records, classes, [priors] * len(records))
+    return {
+        "model_fingerprint": records[0]["model_fingerprint"],
+        "n": len(records),
+        "first": records[0]["as_of"],
+        "last": records[-1]["as_of"],
+        "brier_skill": round(1 - model / baseline, 5) if baseline > 0 else None,
+    }
+
+
 def live_skill(*, db_path: Path | str | None = None, min_rows: int = MIN_LIVE_ROWS) -> dict:
     """Out-of-sample skill on predictions the system actually issued.
 
@@ -355,16 +376,24 @@ def live_skill(*, db_path: Path | str | None = None, min_rows: int = MIN_LIVE_RO
     with connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT target, kind, as_of, probabilities, actual_class, predicted_class
+            SELECT target, kind, as_of, probabilities, actual_class, predicted_class,
+                   model_fingerprint
               FROM predictions
              WHERE resolved_at IS NOT NULL AND actual_class IS NOT NULL
              ORDER BY as_of
             """
         ).fetchall()
 
-    by_target: dict[str, list[dict]] = {}
+    # Keyed by the model, not the target. Promotion replaces the model under a
+    # target's name, so pooling across a promotion would report one skill
+    # number for two different models -- the mistake this column exists to stop.
+    by_model: dict[tuple[str, str | None], list[dict]] = {}
     for row in rows:
-        by_target.setdefault(row["target"], []).append(dict(row))
+        by_model.setdefault((row["target"], row["model_fingerprint"]), []).append(dict(row))
+
+    by_target: dict[str, list[dict]] = {}
+    for (target, _), records in by_model.items():
+        by_target.setdefault(target, []).extend(records)
 
     out = {}
     for target, records in sorted(by_target.items()):
@@ -387,6 +416,22 @@ def live_skill(*, db_path: Path | str | None = None, min_rows: int = MIN_LIVE_RO
             "base_rates": {c: round(p, 4) for c, p in priors.items()},
             "sufficient": len(records) >= min_rows,
         }
+        versions = sorted(
+            {r["model_fingerprint"] for r in records},
+            key=lambda f: (f is None, f or ""),
+        )
+        entry["model_versions"] = versions
+        entry["per_model"] = [
+            _skill_of(group, classes)
+            for key, group in sorted(by_model.items(), key=lambda kv: str(kv[0][1]))
+            if key[0] == target
+        ]
+        if len(versions) > 1:
+            entry["note_versions"] = (
+                f"These {len(records)} predictions span {len(versions)} model versions "
+                f"({', '.join(str(v) for v in versions)}). The combined figure is a record of "
+                "the service, not of any one model; per_model splits it."
+            )
         if not entry["sufficient"]:
             entry["note"] = (
                 f"{len(records)} resolved predictions is too few to measure live skill; "

@@ -268,6 +268,9 @@ def _prediction_row(payload: dict) -> dict:
         "last_close": payload["last_close"],
         "probabilities": primary["probabilities"],
         "predicted_class": primary["predicted_class"],
+        "target": primary.get("target", primary_name),
+        "kind": primary.get("kind", DIRECTION),
+        "model_fingerprint": primary.get("model_fingerprint"),
         "sentiment_score": sentiment.get("sentiment_score") if sentiment.get("available") else None,
         "top_features": primary.get("top_features", []),
     }

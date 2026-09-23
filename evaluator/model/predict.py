@@ -12,6 +12,7 @@ scoring inputs that mean something different from what it learned.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -39,6 +40,11 @@ class ModelNotTrained(FileNotFoundError):
 class LoadedModel:
     booster: lgb.Booster
     metadata: dict
+    #: Which trained model this is. A prediction is only comparable with
+    #: another prediction from the same one, and promotion silently replaces
+    #: the model under a target's name -- so the log records this, not just
+    #: the target, or two models' calls merge into one "live skill" number.
+    fingerprint: str = ""
 
     @property
     def feature_names(self) -> list[str]:
@@ -63,6 +69,7 @@ def load_model(target_name: str) -> LoadedModel:
     return LoadedModel(
         booster=lgb.Booster(model_file=str(model_path)),
         metadata=json.loads(meta_path.read_text()),
+        fingerprint=hashlib.sha1(model_path.read_bytes()).hexdigest()[:12],
     )
 
 
@@ -122,6 +129,7 @@ def score_target(
 
     result = {
         "target": target_name,
+        "model_fingerprint": model.fingerprint,
         "horizon_days": model.metadata["spec"]["horizon_days"],
         "kind": model.metadata["spec"]["kind"],
         "probabilities": {class_names[c]: round(float(proba[c]), 4) for c in class_names},
