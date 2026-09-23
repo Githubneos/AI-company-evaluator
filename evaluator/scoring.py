@@ -194,6 +194,7 @@ def leaderboard(
 
     stale_by = _trading_days_since(summary["as_of"])
     return {
+        "regime_guard": _target_guard(target),
         "available": True,
         "as_of": summary["as_of"],
         "computed_at": summary.get("computed_at"),
@@ -206,6 +207,29 @@ def leaderboard(
         "stale_trading_days": stale_by,
         "stale": stale_by > 1,
         "rows": subset.replace({float("nan"): None}).to_dict(orient="records"),
+    }
+
+
+def _target_guard(target: str) -> dict:
+    """Whether this target has a positive measured record in today's market."""
+    from evaluator.model.registry import load_metadata
+    from evaluator.regimes import current_regimes, current_vix
+
+    context = current_regimes(current_vix())
+    by_regime = (load_metadata(target) or {}).get("validation", {}).get("by_regime", {})
+    measured = {
+        regime: by_regime[regime]["brier_skill"]
+        for regime in context["relevant"]
+        if regime in by_regime and by_regime[regime].get("brier_skill") is not None
+    }
+    worst_regime = min(measured, key=measured.get) if measured else None
+    worst = measured.get(worst_regime)
+    return {
+        **context,
+        "target": target,
+        "worst_regime": worst_regime,
+        "worst_skill": worst,
+        "reliable_now": worst is None or worst > 0,
     }
 
 

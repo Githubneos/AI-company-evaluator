@@ -637,6 +637,11 @@
           </div>
           ${targets.length ? seg(targets.map((t) => [t, targetLabel(t)]), board.target, "data-board", "Leaderboard target") : ""}
         </div>
+        ${board.regime_guard && board.regime_guard.reliable_now === false ? `<div class="verdict bad" style="margin-bottom:14px">${ICON.alert}
+          <div><strong>${esc(targetLabel(board.target))} is not usable in today\u2019s market</strong>
+          <span class="muted">Measured skill ${signed(board.regime_guard.worst_skill, 4)} in ${esc(board.regime_guard.worst_regime)},
+            the closest match to today\u2019s ${esc(board.regime_guard.state)} tape (VIX ${fmt(board.regime_guard.vix, "f2")}).
+            Ranking by it would present noise as risk.</span></div></div>` : ""}
         ${board.stale ? `<div class="verdict bad" style="margin-bottom:14px">${ICON.alert}
           <div><strong>These scores are ${board.stale_trading_days} trading days old</strong>
           <span class="muted">Run <code class="mono">python -m scripts.score_universe</code>, or let the nightly job catch up.</span></div></div>` : ""}
@@ -731,6 +736,7 @@
       ${heroCard(payload, meta, prices)}
       ${verdictBanner(payload.model_quality)}
       <div class="grid grid-12">
+        ${regimeGuardBand(payload.regime_guard)}
         ${riskCard(payload, targets)}
         ${directionCard(targets)}
         ${driversCard(targets)}
@@ -793,6 +799,23 @@
       </section>`;
   }
 
+  /** Models whose own record says they do not work in markets like today's. */
+  function regimeGuardBand(guard) {
+    if (!guard || !(guard.unreliable_now || []).length) return "";
+    const names = guard.unreliable_now.map((t) => targetLabel(t)).join(", ");
+    const worst = guard.per_target[guard.unreliable_now[0]];
+    return `
+      <section class="verdict bad span-12" role="note">
+        ${ICON.alert}
+        <div>
+          <strong>Not usable in today\u2019s market: ${esc(names)}</strong>
+          <span class="muted">${esc(worst.interpretation)}</span>
+          <div class="xs muted" style="margin-top:6px">VIX ${fmt(guard.vix, "f2")} \u00b7 ${esc(guard.state)} \u00b7
+            judged against measured skill in ${esc((guard.relevant || []).join(", "))}.</div>
+        </div>
+      </section>`;
+  }
+
   function riskCard(p, targets) {
     const R = 50;
     const C = 2 * Math.PI * R;
@@ -821,7 +844,7 @@
             <div class="ring-label">${num(prob, "pct0")}<span class="xs muted">odds</span></div>
           </div>
           <div>
-            <div class="ring-h">${h} day${h > 1 ? "s" : ""}</div>
+            <div class="ring-h">${h} day${h > 1 ? "s" : ""}${unusable(p, `magnitude_${h}d`) ? ' <span class="chip chip-neg" style="height:18px">unusable now</span>' : ""}</div>
             <div class="xs muted">${threshold ? `move &gt; ${fmt(threshold, "pct1")}` : "large move"} · base ${fmt(base, "pct0")}</div>
             <div style="margin-top:8px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
               <span class="chip ${chipCls}" title="Model probability divided by the historical base rate: ${fmt(lift, "lift")} the usual odds">${fmt(lift, "lift")} · ${chipText}</span>
@@ -841,6 +864,8 @@
         <div class="rings">${rings}</div>
       </section>`;
   }
+
+  const unusable = (payload, target) => ((payload.regime_guard || {}).unreliable_now || []).includes(target);
 
   function directionCard(targets) {
     const hasRelative = HORIZONS.some((h) => targets[`rel_direction_${h}d`]);

@@ -13,9 +13,14 @@ where accuracy matters -- so validation reports per regime, not just pooled.
 
 from __future__ import annotations
 
+import logging
+
+import numpy as np
 import pandas as pd
 
 #: NBER business-cycle contractions (peak month -> trough month), inclusive.
+log = logging.getLogger(__name__)
+
 NBER_RECESSIONS = [
     ("1990-07-01", "1991-03-31"),
     ("2001-03-01", "2001-11-30"),
@@ -62,3 +67,64 @@ def regime_for(dates: pd.DatetimeIndex | pd.Series) -> pd.Series:
 
 def regime_names() -> list[str]:
     return [name for name, _, _ in REGIMES]
+
+
+#: VIX bands for today's market state. The named regimes above are calendar
+#: ranges, which cannot classify a live date beyond "recent"; what actually
+#: matters for a model's reliability is the volatility backdrop it is being
+#: asked to work in.
+VOLATILITY_STATES = (
+    ("calm", 0.0, 15.0),
+    ("normal", 15.0, 22.0),
+    ("stressed", 22.0, 30.0),
+    ("crisis", 30.0, float("inf")),
+)
+
+#: Historical regimes that resembled each state, so a model's measured skill
+#: there is the relevant evidence about it today. Judgement, stated openly:
+#: 2022-23 was the stressed backdrop, the two crashes were the crisis ones.
+ANALOGOUS_REGIMES = {
+    "calm": ["recovery", "covid_recovery", "recent"],
+    "normal": ["recovery", "recent"],
+    "stressed": ["rate_hikes", "gfc"],
+    "crisis": ["covid_crash", "gfc"],
+}
+
+
+def volatility_state(vix: float | None) -> str:
+    """Today's backdrop from the VIX level. `unknown` when there is no quote."""
+    if vix is None or not np.isfinite(vix):
+        return "unknown"
+    for name, low, high in VOLATILITY_STATES:
+        if low <= vix < high:
+            return name
+    return "unknown"
+
+
+def current_vix() -> float | None:
+    """The latest VIX close from the local cache; None if unavailable."""
+    from evaluator.data.sources import load_macro
+
+    try:
+        macro = load_macro("2015-01-01")
+    except Exception as exc:  # noqa: BLE001 - the guard degrades, it does not fail
+        log.warning("VIX unavailable for the regime guard: %s", exc)
+        return None
+    if macro is None or macro.empty or "vix" not in macro:
+        return None
+    series = macro["vix"].dropna()
+    return float(series.iloc[-1]) if len(series) else None
+
+
+def current_regimes(vix: float | None = None, today: pd.Timestamp | None = None) -> dict:
+    """The regimes whose measured skill describes a model's reliability today.
+
+    The calendar regime says where we are in the validation split; the
+    volatility state says what kind of market it is. Both are reported, and the
+    guard takes the worst measured skill across them.
+    """
+    when = pd.Timestamp(today) if today is not None else pd.Timestamp.now().normalize()
+    calendar = str(regime_for(pd.DatetimeIndex([when])).iloc[0])
+    state = volatility_state(vix)
+    relevant = [calendar] + [r for r in ANALOGOUS_REGIMES.get(state, []) if r != calendar]
+    return {"as_of": str(when.date()), "vix": vix, "state": state, "calendar": calendar, "relevant": relevant}

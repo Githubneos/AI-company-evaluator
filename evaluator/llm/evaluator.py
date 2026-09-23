@@ -33,29 +33,36 @@ evaluation must lead with that and must NOT present the probabilities as a \
 signal, a lean, or a tilt. Report them as what they are: a model output with no \
 demonstrated predictive content. Do not soften this into "modest but present" \
 or "worth watching."
-2. Never reason about, infer, or mention any input whose `available` field is \
+2. `regime_guard` says whether each model has a positive measured record in \
+markets resembling today's. Any target listed in `regime_guard.unreliable_now` \
+must be reported as unusable right now, in the Assessment, with its measured \
+skill in that regime quoted. A model that lost to the base rate the last time \
+volatility looked like this does not get presented as a signal because its \
+pooled average is positive.
+3. Never reason about, infer, or mention any input whose `available` field is \
 false, except to note it as a limitation. If sentiment is unavailable you know \
 nothing about the news; do not speculate about what it might say. A stale or \
 empty news feed is not evidence of calm.
-3. The probabilities are conditional on a specific question, stated in the \
+4. The probabilities are conditional on a specific question, stated in the \
 `question` field. They are not a view on the company, its valuation, or its \
 prospects. Do not drift into fundamental commentary the payload does not support.
-4. Compare against `baseline_probabilities` whenever you cite a probability. A \
+5. Compare against `baseline_probabilities` whenever you cite a probability. A \
 68% chance of no large move is not a finding if the base rate is also 68%.
-5. `top_features` are SHAP attributions. They explain what drove THIS model's \
+6. `top_features` are SHAP attributions. They explain what drove THIS model's \
 output. They are not causal claims about the stock, and a large attribution \
 from a model with no skill explains noise.
-6. `historical_analogs` are retrieved by feature similarity, not by causal \
+7. `historical_analogs` are retrieved by feature similarity, not by causal \
 resemblance. Report what those situations did next; do not imply this situation \
 must follow.
-7. Carry `data_caveats` into your limitations section in plain language. The \
+8. Carry `data_caveats` into your limitations section in plain language. The \
 universe is survivorship-biased, so downside frequencies are a floor.
-8. This is research tooling. Never phrase output as advice, a recommendation, a \
+9. This is research tooling. Never phrase output as advice, a recommendation, a \
 price target, or a suggested position.
 
 Write in markdown with these sections, and nothing else:
 
-**Assessment** - two to three sentences. Lead with model reliability.
+**Assessment** - two to three sentences. Lead with model reliability, including \
+any target the regime guard marks unusable today.
 **What the model says** - the distribution vs. base rates, plainly. Cover the \
 horizons present in the payload.
 **What drove it** - top attributions, with the skill caveat if it applies.

@@ -118,6 +118,10 @@ class PanelTrainConfig:
     #: Whole dates are kept together so every cross-section stays intact and
     #: `split_panel`'s date-boundary guarantee still holds.
     max_train_rows: int = 800_000
+    #: Train on this subset of the panel's features instead of all of them.
+    #: The ablations showed whole groups (macro, fundamentals) lowering skill,
+    #: and a model cannot be asked to ignore a column it was given.
+    features: list[str] | None = None
     #: Force a date stride instead of deriving one from `max_train_rows`. A
     #: candidate must keep the incumbent's spacing, or the two models' rows
     #: barely overlap and the gate has nothing to compare on.
@@ -378,6 +382,12 @@ def train_target(
 ) -> dict:
     """Walk-forward evaluate then fit a final model for one target."""
     X, y, dates, tickers = panel.target_frame(spec)
+    if cfg.features:
+        missing = [f for f in cfg.features if f not in X.columns]
+        if missing:
+            raise ValueError(f"{spec.name}: requested features missing from the panel: {missing}")
+        X = X[list(cfg.features)]
+        log.info("%s: restricted to %d of %d features", spec.name, len(cfg.features), len(panel.feature_names))
     X, y, dates, tickers, stride = _thin_by_date(
         X, y, dates, tickers, cfg.max_train_rows, stride=cfg.date_stride
     )
@@ -436,7 +446,9 @@ def train_target(
         "target": spec.name,
         "spec": asdict(spec),
         "schema": panel.schema,
-        "feature_names": panel.feature_names,
+        # What this model was actually trained on, which serving reindexes to.
+        "feature_names": list(X.columns),
+        "panel_feature_names": panel.feature_names,
         "class_names": {str(k): v for k, v in spec.class_names.items()},
         "class_priors": overall_priors.tolist(),
         "train_rows": int(len(X)),

@@ -12,14 +12,39 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import replace
 
 from evaluator.config import ValidationConfig, default_targets
 from evaluator.features.store import load_panel
+from evaluator.model.ablations import feature_groups, load_ablations
 from evaluator.model.train import PanelTrainConfig, train_all
 
 
 def _fmt(value, spec: str = "+.4f") -> str:
     return "n/a" if value is None else format(value, spec)
+
+
+def resolve_features(requested: str, available: list[str]) -> list[str]:
+    """Group names expand to their features; anything else must be a real column."""
+    groups = feature_groups(available)
+    chosen: list[str] = []
+    for name in (part.strip() for part in requested.split(",") if part.strip()):
+        if name in groups:
+            chosen.extend(groups[name])
+        elif name in available:
+            chosen.append(name)
+        else:
+            raise SystemExit(
+                f"unknown feature or group {name!r}. Groups: {', '.join(sorted(groups))}"
+            )
+    # Keep panel order and drop duplicates, so two overlapping groups are fine.
+    seen = set()
+    return [f for f in available if f in set(chosen) and not (f in seen or seen.add(f))]
+
+
+def recommended_features(target: str) -> list[str]:
+    report = load_ablations(target)
+    return list(report.get("recommended_features", [])) if report else []
 
 
 def main() -> None:
@@ -30,6 +55,11 @@ def main() -> None:
     parser.add_argument("--embargo-days", type=int, default=10)
     parser.add_argument("--max-train-rows", type=int, default=800_000,
                         help="cap rows by keeping every Nth date; lower it if memory is tight")
+    parser.add_argument("--features", default=None,
+                        help="comma-separated feature groups (volatility,technical,sector,events,macro,"
+                             "fundamentals) or exact feature names; default is every feature")
+    parser.add_argument("--from-ablations", action="store_true",
+                        help="train each target on its own ablations.json recommended_features")
     parser.add_argument("--date-stride", type=int, default=None,
                         help="force the date stride (use the incumbent's, so the promotion gate "
                              "can compare the two models on shared rows)")
@@ -80,7 +110,25 @@ def main() -> None:
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
 
-    results = train_all(targets, cfg, panel)
+    if args.features and args.from_ablations:
+        raise SystemExit("--features and --from-ablations both choose the feature set; pick one")
+    if args.features:
+        cfg.features = resolve_features(args.features, panel.feature_names)
+        print(f"features: {len(cfg.features)} of {len(panel.feature_names)} ({args.features})\n")
+
+    results = {}
+    for spec in targets:
+        target_cfg = cfg
+        if args.from_ablations:
+            recommended = recommended_features(spec.name)
+            if not recommended:
+                raise SystemExit(
+                    f"no ablations.json for {spec.name}; run: "
+                    f"python -m scripts.evaluate_ablations --targets {spec.name}"
+                )
+            target_cfg = replace(cfg, features=recommended)
+            print(f"{spec.name}: {len(recommended)} recommended features")
+        results.update(train_all([spec], target_cfg, panel))
 
     print(f"\n{'target':<16} {'brier_skill':>12} {'auc':>7} {'avg_prec':>9} {'p@5%':>7} {'base':>7}")
     print("-" * 62)
