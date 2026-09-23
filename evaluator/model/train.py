@@ -446,6 +446,10 @@ def train_target(
         "target": spec.name,
         "spec": asdict(spec),
         "schema": panel.schema,
+        # Which built panel this came from, not just which columns. The gate
+        # refuses to compare models across panels, and disqualifies any model
+        # whose panel was later retired.
+        "panel": panel.provenance,
         # What this model was actually trained on, which serving reindexes to.
         "feature_names": list(X.columns),
         "panel_feature_names": panel.feature_names,

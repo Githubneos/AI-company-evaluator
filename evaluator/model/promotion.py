@@ -1,16 +1,24 @@
 """The promotion gate (spec 8.3): what may replace a model that is serving traffic.
 
-Three refusals, in order:
+Four refusals, in order:
 
+0. **A retired training panel.** Checked before any score, and applied to the
+   *incumbent*: a model fitted on a panel later found to be wrong about its own
+   data is disqualified, not compared. Its measured skill is not evidence, and
+   leaving it in the comparison lets a contaminated model beat the clean
+   replacement built to correct it. See `registry.RETIRED_PANELS`.
 1. **No measured skill.** A candidate that cannot beat its own base rate is
    never promoted, however bad the incumbent is.
-2. **Not better on shared ground.** Pooled skill from two different training
+2. **A different panel.** Two panels are two populations; neither pooled skill
+   nor shared rows compare like for like across them, so the gate refuses and
+   asks for a retrain rather than guessing.
+3. **Not better on shared ground.** Pooled skill from two different training
    runs is not comparable: a candidate trained on a wider universe or a longer
    history faces different rows. Where both sides have out-of-fold predictions
    keyed by (ticker, date), the candidate must win on the rows they *share*,
    with a bootstrap interval that clears zero. Dates, not rows, are resampled:
    rows within a day share one market move.
-3. **Regime regression.** A candidate that improves on average while getting
+4. **Regime regression.** A candidate that improves on average while getting
    worse in one regime is refused, because the regimes it loses in are the
    volatile ones where the score matters most.
 
@@ -25,12 +33,21 @@ import logging
 import os
 import shutil
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from evaluator.metrics import brier_score
-from evaluator.model.registry import CANDIDATE, PRODUCTION, load_metadata, model_dir
+from evaluator.model.registry import (
+    CANDIDATE,
+    PRODUCTION,
+    RETIRED_DIR,
+    is_retired,
+    load_metadata,
+    model_dir,
+    panel_of,
+)
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +121,14 @@ def compare(candidate: dict, incumbent: dict | None, common: dict | None = None)
     cand_pooled = candidate["validation"]["pooled_out_of_sample"]
     cand_skill = cand_pooled.get("brier_skill")
 
+    # Before any score is read. An incumbent trained on a retired panel is not
+    # a bar to clear, because the number it would be judged on was measured on
+    # data now known to be wrong -- which is how a contaminated model came to
+    # beat its own clean replacement. It is treated as absent.
+    retired = is_retired(incumbent)
+    if retired is not None:
+        incumbent, common = None, None
+
     if cand_skill is None or cand_skill <= MIN_SKILL:
         return {
             "promote": False,
@@ -115,10 +140,17 @@ def compare(candidate: dict, incumbent: dict | None, common: dict | None = None)
         }
 
     if incumbent is None:
+        reason = f"No incumbent; candidate has positive skill ({cand_skill:+.4f})."
+        if retired is not None:
+            reason = (
+                f"Incumbent disqualified: its training panel is retired. {retired} "
+                f"Candidate has positive skill ({cand_skill:+.4f}) and replaces it unconditionally."
+            )
         return {
             "promote": True,
-            "reason": f"No incumbent; candidate has positive skill ({cand_skill:+.4f}).",
+            "reason": reason,
             "candidate_skill": cand_skill,
+            "incumbent_retired": retired,
         }
 
     inc_pooled = incumbent["validation"]["pooled_out_of_sample"]
@@ -127,6 +159,20 @@ def compare(candidate: dict, incumbent: dict | None, common: dict | None = None)
 
     # Shared rows decide when they exist; pooled skill across different training
     # runs compares different populations and can favour the easier one.
+    cand_panel, inc_panel = panel_of(candidate), panel_of(incumbent)
+    if cand_panel and inc_panel and cand_panel != inc_panel:
+        return {
+            **verdict,
+            "promote": False,
+            "reason": (
+                f"Candidate was trained on panel {cand_panel}, the incumbent on {inc_panel}. "
+                "Two panels are two different populations, so neither the pooled skills nor the "
+                "shared rows compare like for like. Retrain the incumbent's target on the "
+                "current panel, then run the gate again."
+            ),
+            "panels": {"candidate": cand_panel, "incumbent": inc_panel},
+        }
+
     if common and common.get("available"):
         edge, (lo, _hi) = common["edge"], common["ci90"]
         if edge is None or edge <= 0 or lo <= -REGRESSION_TOLERANCE:
@@ -206,6 +252,29 @@ def swap_into_production(target: str) -> None:
     load_model.cache_clear()
 
 
+def retire(target: str) -> Path:
+    """Move a production model out of service, keeping its evidence.
+
+    Retiring is not deleting: the booster and every analysis report move to
+    `artifacts/retired/<target>`, so the record of what was served, and of what
+    it was measured at, survives the decision to stop serving it.
+    """
+    source = model_dir(target, PRODUCTION)
+    if not source.exists():
+        raise FileNotFoundError(f"no production model for {target!r}")
+    RETIRED_DIR.mkdir(parents=True, exist_ok=True)
+    destination = RETIRED_DIR / target
+    if destination.exists():
+        shutil.rmtree(destination)
+    os.rename(source, destination)
+
+    from evaluator.model.predict import load_model
+
+    load_model.cache_clear()
+    log.info("retired %s -> %s", target, destination)
+    return destination
+
+
 def promote(target: str, *, apply: bool = False) -> dict:
     candidate = load_metadata(target, CANDIDATE)
     if candidate is None:
@@ -216,7 +285,9 @@ def promote(target: str, *, apply: bool = False) -> dict:
         }
 
     incumbent = load_metadata(target, PRODUCTION)
-    common = common_row_comparison(target) if incumbent is not None else None
+    # No point bootstrapping a comparison against a model that cannot win it.
+    disqualified = is_retired(incumbent) is not None
+    common = common_row_comparison(target) if incumbent is not None and not disqualified else None
     verdict = compare(candidate, incumbent, common)
     verdict["target"] = target
 
@@ -226,4 +297,4 @@ def promote(target: str, *, apply: bool = False) -> dict:
     return verdict
 
 
-__all__ = ["common_row_comparison", "compare", "promote", "swap_into_production"]
+__all__ = ["common_row_comparison", "compare", "promote", "retire", "swap_into_production"]

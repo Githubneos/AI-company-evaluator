@@ -18,7 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -55,12 +56,42 @@ def schema_hash(feature_names: list[str]) -> str:
     return hashlib.sha1("|".join(sorted(feature_names)).encode()).hexdigest()[:12]
 
 
+def panel_id(schema: str, tickers: int, rows: int, start: str, end: str) -> str:
+    """Identity of one built panel, not just of its column names.
+
+    The schema hash answers "are these the same features?". It cannot answer
+    "is this the same data?", and that is the question the promotion gate got
+    wrong: a panel rebuilt after a look-ahead fix has the same 44 columns as
+    the panel that contained the leak. Two models are only comparable if this
+    matches.
+    """
+    parts = "|".join((schema, str(tickers), str(rows), start, end))
+    return hashlib.sha1(parts.encode()).hexdigest()[:12]
+
+
+def _git_commit() -> str | None:
+    """The working tree's commit, when there is one. Best effort by design."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(ARTIFACT_DIR).parent, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
 @dataclass
 class FeaturePanel:
     frame: pd.DataFrame
     feature_names: list[str]
     label_names: list[str]
     schema: str
+    #: Which built panel this is: see `panel_id`. Last and defaulted so the
+    #: many places that construct a panel from parts stay valid.
+    provenance: dict = field(default_factory=dict)
 
     def target_frame(self, spec: TargetSpec) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
         """(X, y, dates, tickers) for one target, dropping unlabelled rows.
@@ -166,24 +197,26 @@ def build_panel(
         raise RuntimeError(f"forward-looking columns in the feature set: {leaked}")
     schema = schema_hash(feature_names)
 
+    meta = {
+        "schema": schema,
+        "feature_names": feature_names,
+        "label_names": label_names,
+        "tickers": int(panel["ticker"].nunique()),
+        "rows": int(len(panel)),
+        "start": str(panel["date"].min().date()),
+        "end": str(panel["date"].max().date()),
+        "failures": failures,
+        "targets": [t.name for t in targets],
+    }
+    meta["panel_id"] = panel_id(schema, meta["tickers"], meta["rows"], meta["start"], meta["end"])
+    meta["built_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+    meta["git_commit"] = _git_commit()
+
     atomic_write_parquet(panel, PANEL_PATH, index=False)
-    atomic_write_json(
-        {
-            "schema": schema,
-            "feature_names": feature_names,
-            "label_names": label_names,
-            "tickers": int(panel["ticker"].nunique()),
-            "rows": int(len(panel)),
-            "start": str(panel["date"].min().date()),
-            "end": str(panel["date"].max().date()),
-            "failures": failures,
-            "targets": [t.name for t in targets],
-        },
-        META_PATH,
-    )
+    atomic_write_json(meta, META_PATH)
     log.info("panel: %s rows, %s tickers, schema %s", f"{len(panel):,}", panel["ticker"].nunique(), schema)
 
-    return FeaturePanel(panel, feature_names, label_names, schema)
+    return FeaturePanel(panel, feature_names, label_names, schema, panel_provenance(meta))
 
 
 def _meta() -> dict:
@@ -210,12 +243,29 @@ def load_panel(targets: list[TargetSpec] | None = None) -> FeaturePanel:
 
     frame = pd.read_parquet(PANEL_PATH, columns=columns)
     label_names = [c for c in meta["label_names"] if c in frame.columns]
-    return FeaturePanel(frame, meta["feature_names"], label_names, meta["schema"])
+    return FeaturePanel(frame, meta["feature_names"], label_names, meta["schema"], panel_provenance(meta))
 
 
 def panel_schema() -> str:
     """The stored schema hash without loading the panel."""
     return _meta()["schema"]
+
+
+def panel_provenance(meta: dict | None = None) -> dict:
+    """Which panel this is, for a model to record and the gate to compare.
+
+    A panel built before `panel_id` existed has none, and gets one derived from
+    what it does record, so the old panels are identifiable too.
+    """
+    meta = meta if meta is not None else _meta()
+    known = {k: meta.get(k) for k in ("schema", "tickers", "rows", "start", "end")}
+    return {
+        "panel_id": meta.get("panel_id")
+        or panel_id(known["schema"], known["tickers"], known["rows"], known["start"], known["end"]),
+        "built_at": meta.get("built_at"),
+        "git_commit": meta.get("git_commit"),
+        **known,
+    }
 
 
 def align_to_schema(row: pd.DataFrame, feature_names: list[str], schema: str) -> pd.DataFrame:
