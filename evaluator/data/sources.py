@@ -16,6 +16,7 @@ Polygon loader can replace it without touching features, labels, or models.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pandas as pd
 
@@ -33,7 +34,7 @@ log = logging.getLogger(__name__)
 OHLCV = ["open", "high", "low", "close", "volume"]
 
 
-def _cache_path(ticker: str, start: str, end: str | None) -> object:
+def _cache_path(ticker: str, start: str, end: str | None) -> Path:
     safe = ticker.replace("^", "idx_").replace("/", "_")
     return CACHE_DIR / f"{safe}__{start}__{end or 'latest'}.parquet"
 
@@ -117,12 +118,12 @@ def load_prices(
     return df
 
 
-def _read_cache(path) -> pd.DataFrame | None:
+def _read_cache(path: Path) -> pd.DataFrame | None:
     """A cache that cannot be read is a miss, not a failure: the caller refetches."""
     return read_parquet_or_none(path)
 
 
-def _write_cache(df: pd.DataFrame, path) -> None:
+def _write_cache(df: pd.DataFrame, path: Path) -> None:
     """Atomic: concurrent refreshes of one live series once left a corrupt file (see evaluator.io)."""
     atomic_write_parquet(df, path)
 
