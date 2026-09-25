@@ -90,6 +90,12 @@ TICKER_PATTERN = r"^[A-Za-z0-9.^-]{1,12}$"
 Ticker = Annotated[str, PathParam(pattern=TICKER_PATTERN, description="Ticker symbol, e.g. AAPL or BRK.B")]
 
 
+#: Dates arrive as strings and are used to build cache and score file names, so
+#: anything but YYYY-MM-DD -- "../../x" included -- is refused rather than parsed.
+DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+LookbackStart = Annotated[str, Query(pattern=DATE_PATTERN, description="First bar to load, YYYY-MM-DD")]
+
+
 def _not_found(exc: Exception) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 
@@ -131,7 +137,7 @@ def leaderboard_view(
     target: str = DEFAULT_TARGET,
     sector: str | None = None,
     limit: int = Query(25, ge=1, le=500),
-    as_of: str | None = None,
+    as_of: Annotated[str | None, Query(pattern=DATE_PATTERN)] = None,
 ) -> dict:
     """Highest-probability names from the last nightly scoring run.
 
@@ -165,7 +171,7 @@ def prices(ticker: Ticker, days: int = Query(260, ge=5, le=2520)) -> dict:
 
 
 @app.get("/score/{ticker}")
-def score(ticker: Ticker, lookback_start: str = "2015-01-01") -> dict:
+def score(ticker: Ticker, lookback_start: LookbackStart = "2015-01-01") -> dict:
     """Raw model output across every trained target."""
     try:
         result = score_ticker(ticker.upper(), lookback_start=lookback_start)
@@ -180,7 +186,7 @@ def score(ticker: Ticker, lookback_start: str = "2015-01-01") -> dict:
 @app.get("/payload/{ticker}")
 def payload(
     ticker: Ticker,
-    lookback_start: str = "2015-01-01",
+    lookback_start: LookbackStart = "2015-01-01",
     sentiment: bool = True,
     analogs: bool = True,
 ) -> dict:
@@ -227,7 +233,7 @@ def analogs_only(ticker: Ticker, k: int = Query(5, ge=1, le=25)) -> dict:
 @app.get("/evaluate/{ticker}")
 def evaluate(
     ticker: Ticker,
-    lookback_start: str = "2015-01-01",
+    lookback_start: LookbackStart = "2015-01-01",
     log_prediction_row: bool = True,
     sentiment: bool = True,
     analogs: bool = True,

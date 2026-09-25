@@ -120,3 +120,16 @@ def test_real_world_symbols_pass_validation(monkeypatch):
         assert client.get(f"/payload/{symbol}").status_code == 200, symbol
 
     assert seen == ["AAPL", "BRK.B", "BF-B", "^VIX"]
+
+
+def test_dates_that_would_become_file_names_must_be_dates(monkeypatch):
+    client = TestClient(serving.app)
+    monkeypatch.setattr(serving, "build_payload", lambda *a, **k: {})
+    monkeypatch.setattr(serving, "leaderboard", lambda *a, **k: {"available": False, "rows": []})
+
+    for traversal in ("../../etc/passwd", "2026-9-1", "2026-09-01x", "latest"):
+        assert client.get("/leaderboard", params={"as_of": traversal}).status_code == 422, traversal
+        assert client.get("/payload/AAPL", params={"lookback_start": traversal}).status_code == 422, traversal
+
+    assert client.get("/leaderboard", params={"as_of": "2026-09-18"}).status_code == 200
+    assert client.get("/payload/AAPL", params={"lookback_start": "2015-01-01"}).status_code == 200
