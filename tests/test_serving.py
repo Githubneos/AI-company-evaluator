@@ -133,3 +133,13 @@ def test_dates_that_would_become_file_names_must_be_dates(monkeypatch):
 
     assert client.get("/leaderboard", params={"as_of": "2026-09-18"}).status_code == 200
     assert client.get("/payload/AAPL", params={"lookback_start": "2015-01-01"}).status_code == 200
+
+
+def test_health_reports_the_running_version(monkeypatch):
+    monkeypatch.setattr(serving, "available_targets", lambda: ["magnitude_1d"])
+
+    body = TestClient(serving.app).get("/health").json()
+
+    assert body["status"] == "ok"
+    assert body["version"] == serving.__version__
+    assert body["trained_targets"] == ["magnitude_1d"]

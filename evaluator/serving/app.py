@@ -30,7 +30,7 @@ from evaluator.model.predict import ModelNotTrained, available_targets, load_mod
 from evaluator.model.registry import load_report
 from evaluator.monitoring import system_report
 from evaluator.scoring import DEFAULT_TARGET, UnknownTarget, leaderboard
-from evaluator.serving.auth import API_KEY_HEADER, authorize, identify, is_public, limiter
+from evaluator.serving.auth import API_KEY_HEADER, authorize, configured_keys, identify, is_public, limiter
 
 log = logging.getLogger(__name__)
 
@@ -108,10 +108,9 @@ def dashboard() -> FileResponse:
 
 @app.get("/health")
 def health() -> dict:
-    from evaluator.serving.auth import configured_keys
-
     return {
         "status": "ok",
+        "version": __version__,
         "trained_targets": available_targets(),
         # The dashboard needs to know whether to ask for a key.
         "auth": "api-key" if configured_keys() else "local-only",
