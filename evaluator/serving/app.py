@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -80,6 +82,14 @@ async def revalidate_static(request, call_next):
 PRICE_LOOKBACK_START = "2015-01-01"
 
 
+#: What a ticker may look like on the way in: letters, digits, and the three
+#: punctuation marks real symbols use (BRK.B, ^VIX, BF-B). It reaches cache
+#: filenames, SQL parameters and outbound provider URLs, so the edge refuses
+#: anything else before any of them sees it.
+TICKER_PATTERN = r"^[A-Za-z0-9.^-]{1,12}$"
+Ticker = Annotated[str, PathParam(pattern=TICKER_PATTERN, description="Ticker symbol, e.g. AAPL or BRK.B")]
+
+
 def _not_found(exc: Exception) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 
@@ -135,7 +145,7 @@ def leaderboard_view(
 
 
 @app.get("/prices/{ticker}")
-def prices(ticker: str, days: int = Query(260, ge=5, le=2520)) -> dict:
+def prices(ticker: Ticker, days: int = Query(260, ge=5, le=2520)) -> dict:
     """Recent daily closes, for charting. Not an input to any model."""
     from evaluator.data.sources import load_prices
 
@@ -155,7 +165,7 @@ def prices(ticker: str, days: int = Query(260, ge=5, le=2520)) -> dict:
 
 
 @app.get("/score/{ticker}")
-def score(ticker: str, lookback_start: str = "2015-01-01") -> dict:
+def score(ticker: Ticker, lookback_start: str = "2015-01-01") -> dict:
     """Raw model output across every trained target."""
     try:
         result = score_ticker(ticker.upper(), lookback_start=lookback_start)
@@ -169,7 +179,7 @@ def score(ticker: str, lookback_start: str = "2015-01-01") -> dict:
 
 @app.get("/payload/{ticker}")
 def payload(
-    ticker: str,
+    ticker: Ticker,
     lookback_start: str = "2015-01-01",
     sentiment: bool = True,
     analogs: bool = True,
@@ -189,7 +199,7 @@ def payload(
 
 
 @app.get("/sentiment/{ticker}")
-def sentiment_only(ticker: str) -> dict:
+def sentiment_only(ticker: Ticker) -> dict:
     """News sentiment alone, including the staleness flag."""
     from evaluator.sentiment.aggregate import score_ticker_sentiment
 
@@ -201,7 +211,7 @@ def sentiment_only(ticker: str) -> dict:
 
 
 @app.get("/analogs/{ticker}")
-def analogs_only(ticker: str, k: int = Query(5, ge=1, le=25)) -> dict:
+def analogs_only(ticker: Ticker, k: int = Query(5, ge=1, le=25)) -> dict:
     """Closest historical situations and what followed them."""
     try:
         result = build_payload(
@@ -216,7 +226,7 @@ def analogs_only(ticker: str, k: int = Query(5, ge=1, le=25)) -> dict:
 
 @app.get("/evaluate/{ticker}")
 def evaluate(
-    ticker: str,
+    ticker: Ticker,
     lookback_start: str = "2015-01-01",
     log_prediction_row: bool = True,
     sentiment: bool = True,
@@ -308,7 +318,7 @@ def validation(target: str) -> dict:
 
 
 @app.get("/feedback/{ticker}")
-def feedback(ticker: str) -> dict:
+def feedback(ticker: Ticker) -> dict:
     return feedback_context(ticker.upper())
 
 

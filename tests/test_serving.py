@@ -98,3 +98,25 @@ def test_validation_endpoint_carries_baselines_when_computed(monkeypatch):
     body = client.get("/model/magnitude_1d/validation").json()
     assert body["baselines"] == {"verdict": "v"} and body["ablations"] == {"sets": {}}
     assert body["vol_benchmarks"] == {"benchmarks": {}}
+
+
+def test_malformed_tickers_are_refused_at_the_edge(monkeypatch):
+    client = TestClient(serving.app)
+    called = []
+    monkeypatch.setattr(serving, "build_payload", lambda *a, **k: called.append(1) or {})
+
+    for bad in ("A" * 13, "AAPL%20X", "AA;PL", "AA%27PL", "%2E%2E%2Fsecret"):
+        assert client.get(f"/payload/{bad}").status_code in (404, 422), bad
+
+    assert called == []
+
+
+def test_real_world_symbols_pass_validation(monkeypatch):
+    seen = []
+    monkeypatch.setattr(serving, "build_payload", lambda ticker, **k: seen.append(ticker) or {"ok": True})
+    client = TestClient(serving.app)
+
+    for symbol in ("aapl", "BRK.B", "BF-B", "^VIX"):
+        assert client.get(f"/payload/{symbol}").status_code == 200, symbol
+
+    assert seen == ["AAPL", "BRK.B", "BF-B", "^VIX"]
