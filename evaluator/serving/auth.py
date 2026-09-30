@@ -9,7 +9,7 @@ The default is chosen so that the safe thing happens when nothing is
 configured:
 
 - **Keys configured** (``EVALUATOR_API_KEYS``): every endpoint except the
-  dashboard, its static files and ``/health`` needs ``X-API-Key``.
+  dashboard, its static files, ``/health`` and ``/ready`` needs ``X-API-Key``.
 - **No keys configured**: the costly endpoints answer **only to loopback**, so
   a laptop stays usable and a service exposed to a network by accident is not.
 
@@ -36,7 +36,7 @@ API_KEYS_ENV = "EVALUATOR_API_KEYS"
 
 #: Paths anyone may reach: the dashboard itself, its assets, and liveness.
 PUBLIC_PREFIXES = ("/static", "/docs", "/redoc", "/openapi.json")
-PUBLIC_PATHS = ("/", "/health", "/favicon.ico")
+PUBLIC_PATHS = ("/", "/health", "/ready", "/favicon.ico")
 
 #: Endpoints that cost money or time on every call.
 COSTLY_PREFIXES = ("/evaluate", "/sentiment", "/feedback/resolve")

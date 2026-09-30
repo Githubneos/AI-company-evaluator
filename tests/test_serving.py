@@ -143,3 +143,25 @@ def test_health_reports_the_running_version(monkeypatch):
     assert body["status"] == "ok"
     assert body["version"] == serving.__version__
     assert body["trained_targets"] == ["magnitude_1d"]
+
+
+def test_ready_is_503_until_a_model_is_promoted(monkeypatch):
+    monkeypatch.setattr(serving, "latest_summary", lambda: None)
+    client = TestClient(serving.app)
+
+    monkeypatch.setattr(serving, "available_targets", lambda: [])
+    unready = client.get("/ready")
+    assert unready.status_code == 503
+    assert unready.json()["ready"] is False and "promote" in unready.json()["reason"]
+
+    monkeypatch.setattr(serving, "available_targets", lambda: ["magnitude_1d"])
+    monkeypatch.setattr(serving, "latest_summary", lambda: {"as_of": "2026-09-18"})
+    ok = client.get("/ready")
+    assert ok.status_code == 200
+    assert ok.json() == {"ready": True, "trained_targets": ["magnitude_1d"], "scores_as_of": "2026-09-18"}
+
+
+def test_ready_needs_no_api_key_so_a_probe_can_reach_it(monkeypatch):
+    from evaluator.serving.auth import is_public
+
+    assert is_public("/ready")

@@ -29,7 +29,7 @@ from evaluator.llm.provider import LLMUnavailable
 from evaluator.model.predict import ModelNotTrained, available_targets, load_model, score_ticker
 from evaluator.model.registry import load_report
 from evaluator.monitoring import system_report
-from evaluator.scoring import DEFAULT_TARGET, UnknownTarget, leaderboard
+from evaluator.scoring import DEFAULT_TARGET, UnknownTarget, latest_summary, leaderboard
 from evaluator.serving.auth import API_KEY_HEADER, authorize, configured_keys, identify, is_public, limiter
 
 log = logging.getLogger(__name__)
@@ -115,6 +115,26 @@ def health() -> dict:
         # The dashboard needs to know whether to ask for a key.
         "auth": "api-key" if configured_keys() else "local-only",
     }
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness, as opposed to liveness: can this instance actually answer?
+
+    `/health` says the process is up. A process with no promoted model is up and
+    useless -- every scoring endpoint 404s -- so a load balancer or deploy check
+    should gate on this one instead.
+    """
+    targets = available_targets()
+    summary = latest_summary()
+    body = {
+        "ready": bool(targets),
+        "trained_targets": targets,
+        "scores_as_of": summary["as_of"] if summary else None,
+    }
+    if not targets:
+        body["reason"] = "no promoted models. Run: python -m scripts.promote --apply"
+    return JSONResponse(body, status_code=200 if targets else 503)
 
 
 @app.get("/universe")
