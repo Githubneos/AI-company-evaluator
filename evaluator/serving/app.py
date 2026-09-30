@@ -77,6 +77,25 @@ async def revalidate_static(request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
+SECURITY_HEADERS = {
+    # The dashboard serves JSON and its own assets; nothing here should be
+    # sniffed into another content type, framed by another origin, or leak its
+    # URL (which can carry a ticker or a date) in a Referer header.
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Registered last, so it is outermost and also covers the guard's 401 and 429 replies."""
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 # Must match the lookback `score_ticker` uses, so the price chart reads the same
 # cached bars scoring already fetched instead of writing a second cache file.
 PRICE_LOOKBACK_START = "2015-01-01"

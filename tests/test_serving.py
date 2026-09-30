@@ -165,3 +165,17 @@ def test_ready_needs_no_api_key_so_a_probe_can_reach_it(monkeypatch):
     from evaluator.serving.auth import is_public
 
     assert is_public("/ready")
+
+
+def test_every_reply_carries_the_security_headers_even_a_refusal(monkeypatch):
+    monkeypatch.setenv("EVALUATOR_API_KEYS", "k" * 32)
+    client = TestClient(serving.app)
+
+    ok = client.get("/health")
+    refused = client.get("/universe")  # keys configured, none presented
+
+    assert refused.status_code == 401
+    for response in (ok, refused):
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["x-frame-options"] == "DENY"
+        assert response.headers["referrer-policy"] == "no-referrer"
