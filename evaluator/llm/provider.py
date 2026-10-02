@@ -67,9 +67,11 @@ class GeminiProvider:
             "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_output_tokens},
         }
         request = urllib.request.Request(
-            f"{GEMINI_ENDPOINT.format(model=self.model)}?key={self.api_key}",
+            GEMINI_ENDPOINT.format(model=self.model),
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            # A header, not `?key=`: a key in the URL ends up in proxy and server
+            # access logs and in any exception text that echoes the request URL.
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
             method="POST",
         )
 

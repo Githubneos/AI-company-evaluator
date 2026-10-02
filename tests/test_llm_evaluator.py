@@ -151,3 +151,33 @@ class TestGeminiProvider:
     def test_missing_key_is_not_silently_treated_as_available(self, monkeypatch):
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         assert GeminiProvider().available() is False
+
+
+def test_gemini_key_travels_in_a_header_never_the_url(monkeypatch):
+    import io
+    import json
+
+    from evaluator.llm import provider
+
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-key-123")
+    seen = {}
+
+    class Reply(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout):
+        seen["url"] = request.full_url
+        seen["headers"] = {k.lower(): v for k, v in request.header_items()}
+        return Reply(json.dumps({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]}).encode())
+
+    monkeypatch.setattr(provider.urllib.request, "urlopen", fake_urlopen)
+
+    result = provider.GeminiProvider().complete("system", "user")
+
+    assert result.text == "hi"
+    assert "secret-key-123" not in seen["url"]
+    assert seen["headers"]["x-goog-api-key"] == "secret-key-123"
