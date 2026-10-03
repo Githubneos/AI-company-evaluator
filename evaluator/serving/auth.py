@@ -56,6 +56,11 @@ class Limit:
         return self.capacity / self.per_seconds
 
 
+#: Past this many buckets, those that have fully refilled are dropped. With no
+#: keys configured every caller address gets one, so an unbounded dict is a
+#: memory leak anyone on the network can feed.
+MAX_BUCKETS = 10_000
+
 #: Per identity (API key, or client address when no keys are configured).
 LIMITS = {
     "/evaluate": Limit(10, 3600),
@@ -76,8 +81,9 @@ class _Bucket:
 class RateLimiter:
     """Token buckets per (identity, bucket name), in this process only."""
 
-    def __init__(self, limits: dict[str, Limit] | None = None) -> None:
+    def __init__(self, limits: dict[str, Limit] | None = None, max_buckets: int = MAX_BUCKETS) -> None:
         self.limits = limits or LIMITS
+        self.max_buckets = max_buckets
         self._buckets: dict[tuple[str, str], _Bucket] = {}
         self._lock = threading.Lock()
 
@@ -87,12 +93,28 @@ class RateLimiter:
                 return prefix
         return "default"
 
+    def _prune(self, now: float) -> None:
+        """Drop buckets that have refilled completely (caller holds the lock).
+
+        A full bucket is indistinguishable from a new one, so forgetting it
+        changes no caller's limit -- it only returns the memory.
+        """
+        full = [
+            key
+            for key, bucket in self._buckets.items()
+            if bucket.tokens + (now - bucket.updated) * self.limits[key[1]].rate >= self.limits[key[1]].capacity
+        ]
+        for key in full:
+            del self._buckets[key]
+
     def check(self, identity: str, path: str) -> tuple[bool, int]:
         """(allowed, seconds until a token is next available)."""
         name = self.bucket_for(path)
         limit = self.limits[name]
         now = time.monotonic()
         with self._lock:
+            if len(self._buckets) >= self.max_buckets:
+                self._prune(now)
             bucket = self._buckets.get((identity, name))
             if bucket is None:
                 bucket = _Bucket(tokens=float(limit.capacity), updated=now)

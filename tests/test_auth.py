@@ -135,3 +135,30 @@ def test_limits_are_per_process_and_the_buckets_are_real():
 
     assert auth.RateLimiter({"default": auth.Limit(1, 3600)}).check("k", "/x")[0]
     time.sleep(0)  # no wall-clock dependence in this assertion
+
+
+def test_fully_refilled_buckets_are_forgotten_once_the_table_is_full(monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(auth.time, "monotonic", lambda: clock["now"])
+    limiter = auth.RateLimiter({"default": auth.Limit(2, 10)}, max_buckets=3)
+
+    for caller in ("a", "b", "c"):
+        assert limiter.check(caller, "/x")[0]
+    assert len(limiter._buckets) == 3
+
+    clock["now"] += 60  # every bucket has long since refilled
+    assert limiter.check("d", "/x")[0]
+    assert set(limiter._buckets) == {("d", "default")}
+
+
+def test_pruning_never_forgets_a_caller_who_is_still_limited(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(auth.time, "monotonic", lambda: clock["now"])
+    limiter = auth.RateLimiter({"default": auth.Limit(1, 3600)}, max_buckets=2)
+
+    assert limiter.check("busy", "/x")[0]
+    assert limiter.check("other", "/x")[0]
+    clock["now"] += 1
+    assert limiter.check("third", "/x")[0]  # table full: prune runs, nobody has refilled
+
+    assert not limiter.check("busy", "/x")[0]  # still refused, bucket survived
