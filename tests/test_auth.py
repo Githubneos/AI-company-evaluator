@@ -114,7 +114,11 @@ def test_the_endpoint_returns_429_with_retry_after(client, monkeypatch):
 
 
 def test_identity_is_the_key_when_present_else_the_caller():
-    assert auth.identify("abcdefghijkl", "1.2.3.4") == "key:abcdefgh"
+    identity = auth.identify("abcdefghijkl", "1.2.3.4")
+    assert identity.startswith("key:") and "abcdefgh" not in identity
+    assert identity == auth.identify("abcdefghijkl", "9.9.9.9")  # the key, not the address
+    # Keys that merely share a prefix are different callers.
+    assert auth.identify("abcdefgh-one", None) != auth.identify("abcdefgh-two", None)
     assert auth.identify(None, "1.2.3.4") == "ip:1.2.3.4"
     assert auth.identify(None, None) == "ip:unknown"
 

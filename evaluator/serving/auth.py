@@ -22,6 +22,7 @@ pretended away.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -158,7 +159,10 @@ def key_is_valid(presented: str | None, keys: set[str]) -> bool:
 def identify(presented: str | None, client: str | None) -> str:
     """What the rate limit counts against: the key if there is one, else the caller."""
     if presented:
-        return f"key:{presented[:8]}"
+        # A digest, not a prefix: two keys that share their first characters must
+        # not share a limit, and no part of a secret should sit in the bucket
+        # table or in any log line that prints an identity.
+        return f"key:{hashlib.sha256(presented.encode()).hexdigest()[:16]}"
     return f"ip:{client or 'unknown'}"
 
 
