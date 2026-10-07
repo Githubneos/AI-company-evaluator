@@ -573,6 +573,10 @@ python -m scripts.backfill_oos_tickers --apply   # one-off, for models trained b
 
 ```
 GET  /                            browser dashboard
+GET  /health                      liveness, version, trained targets
+GET  /ready                       readiness: 503 until a model is promoted
+GET  /universe                    the S&P 500 names, sectors and survivorship caveat
+GET  /leaderboard                 highest-probability names from the nightly run
 GET  /score/{ticker}              raw model output, all targets
 GET  /payload/{ticker}            fusion payload, no LLM call and no cost
 GET  /evaluate/{ticker}           full pipeline through the written evaluation
@@ -584,6 +588,10 @@ GET  /monitoring                  feedback health, drift, post-mortem tags
 POST /feedback/resolve            close out elapsed prediction windows
 ```
 
+Tickers must match `[A-Za-z0-9.^-]{1,12}` and dates must be `YYYY-MM-DD`; anything
+else is a 422 before it can reach a cache path, a query or a provider URL. An
+unknown `/leaderboard` target is a 404 that lists the targets actually scored.
+
 `/evaluate` logs the prediction *before* calling the LLM, so the record survives
 a reasoning-layer failure. An unlogged prediction cannot be scored later, and
 that is the one loss this system cannot recover from.
@@ -591,13 +599,18 @@ that is the one loss this system cannot recover from.
 ## Operations
 
 ```bash
-python -m evaluator.scheduler --list           # registered jobs and cadences
+python -m evaluator.scheduler --list           # registered jobs, cadences, cron lines
+python -m evaluator.scheduler --run score_universe   # exit 1 if the job failed
 python -m evaluator.scheduler --install-cron   # crontab to install
 python -m scripts.retrain --check              # drift + cadence decision
 python -m scripts.postmortem                   # tag wrong predictions
 python -m scripts.promote --all                # regime-aware promotion gate
 python -m scripts.monitoring_report            # static HTML dashboard
 ```
+
+A job that is still running when its next slot arrives is skipped, not stacked;
+the scheduler holds a per-job lock under `artifacts/locks/`, which the OS
+releases if the holder dies.
 
 The promotion gate refuses a candidate that improves on average but regresses in
 any single regime (spec 8.3), and refuses any model without measured skill —
@@ -630,7 +643,7 @@ evaluator/
 .venv/bin/python -m pytest
 ```
 
-150 tests, no API key or network required.
+333 tests, no API key or network required.
 
 The leakage suites are the ones that matter, because a leak fails nothing — it
 just makes every metric downstream wrong:
